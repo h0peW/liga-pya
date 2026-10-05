@@ -3650,7 +3650,7 @@
         }
 
         window.openDomesticLeagueManager = function() {
-            if (!adminActionAllowed()) {
+            if (!isAuthorizedAdmin()) {
                 showToast('Solo el administrador puede configurar las ligas.');
                 return;
             }
@@ -3701,7 +3701,7 @@
         };
 
         window.saveDomesticLeagueSetup = async function() {
-            if (!adminActionAllowed()) {
+            if (!isAuthorizedAdmin()) {
                 showToast('Solo el administrador puede configurar las ligas.');
                 return;
             }
@@ -3789,7 +3789,7 @@
         };
 
         window.renameCurrentLeague = async function() {
-            if (!adminActionAllowed()) {
+            if (!isAuthorizedAdmin()) {
                 showToast('Solo el administrador puede renombrar temporadas.');
                 return;
             }
@@ -3871,7 +3871,7 @@
         };
 
         window.renameCurrentElimination = async function() {
-            if (!adminActionAllowed()) {
+            if (!isAuthorizedAdmin()) {
                 showToast('Solo el administrador puede renombrar eliminatorias.');
                 return;
             }
@@ -4141,7 +4141,7 @@
         }
 
         window.updateQualificationSlots = async function() {
-            if (!adminActionAllowed()) {
+            if (!isAuthorizedAdmin()) {
                 showToast('Solo el administrador puede cambiar los cupos europeos.');
                 renderQualificationControls();
                 return;
@@ -9051,10 +9051,7 @@
             'saveEditedPlayer', 'startEditPlayer', 'removePlayer', 'handleTransferPhotoFile',
             'restoreRecoveredLeagueToFirebase',
             'onTransferPlayerChange', 'onTransferImageUrlInput', 'handleAwardTrophyFile',
-            'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup',
-            'renameCurrentLeague', 'renameCurrentElimination',
-            'openDomesticLeagueManager', 'saveDomesticLeagueSetup',
-            'updateQualificationSlots'
+            'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup'
         ];
 
         function adminActionAllowed() {
