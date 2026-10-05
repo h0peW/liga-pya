@@ -184,9 +184,10 @@
             padding: 2px;
             display: inline-block;
         }
-        
-        .rank-champions { border-left: 4px solid #3b82f6 !important; } 
-        .rank-europa { border-left: 4px solid #f97316 !important; } 
+        .rank-champions { border-left: 4px solid #3b82f6 !important; }
+        .rank-europa { border-left: 4px solid #f97316 !important; }
+        .rank-relegation { border-left: 4px solid #ef4444 !important; }
+        .rank-promotion { border-left: 4px solid #22c55e !important; }
         .rank-none { border-left: 4px solid transparent !important; }
 
         /* ESTILOS DE LA CANCHA Y JUGADORES */
@@ -1994,6 +1995,19 @@
             color: #e2e8f0 !important;
         }
 
+    
+        /* ---------- ASCENSO / DESCENSO ---------- */
+        html.dark #qualification-footer {
+            background: #172033 !important;
+            border-color: #334155 !important;
+            color: #cbd5e1 !important;
+        }
+
+        html.dark #relegation-legend,
+        html.dark #promotion-legend {
+            color: #e2e8f0 !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2128,18 +2142,31 @@
                     </div>
                     <div id="qualification-footer" class="bg-slate-50 p-4 border-t border-slate-200 text-sm flex flex-wrap gap-4 items-center text-slate-600">
                         <span class="font-semibold mr-2">Clasificación:</span>
-                        <div class="flex items-center gap-1.5">
-                            <div class="w-3 h-3 bg-blue-500 rounded-sm"></div>
-                            <span>Champions League</span>
-                            <span id="champions-slot-display" class="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">4 equipos</span>
-                        </div>
-                        <div class="flex items-center gap-1.5">
-                            <div class="w-3 h-3 bg-orange-500 rounded-sm"></div>
-                            <span>Europa League</span>
-                            <span id="europa-slot-display" class="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">2 equipos</span>
+
+                        <div id="european-qualification-legend" class="flex flex-wrap items-center gap-4">
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-3 h-3 bg-blue-500 rounded-sm"></div>
+                                <span>Champions League</span>
+                                <span id="champions-slot-display" class="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded-full px-2 py-0.5">4 equipos</span>
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <div class="w-3 h-3 bg-orange-500 rounded-sm"></div>
+                                <span>Europa League</span>
+                                <span id="europa-slot-display" class="text-[11px] font-bold text-orange-700 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">2 equipos</span>
+                            </div>
                         </div>
 
-                        <div data-admin-only class="ml-auto flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
+                        <div id="relegation-legend" class="flex items-center gap-1.5">
+                            <div class="w-3 h-3 bg-red-500 rounded-sm"></div>
+                            <span class="font-semibold">Descenso</span>
+                        </div>
+
+                        <div id="promotion-legend" class="hidden flex items-center gap-1.5">
+                            <div class="w-3 h-3 bg-green-500 rounded-sm"></div>
+                            <span class="font-semibold">Ascenso</span>
+                        </div>
+
+                        <div id="qualification-admin-controls" data-admin-only class="ml-auto flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
                             <span class="text-[10px] uppercase tracking-wider font-black text-slate-400 mr-1">
                                 <i class="fa-solid fa-pen-to-square mr-1"></i> Editar cupos
                             </span>
@@ -3650,7 +3677,7 @@
         }
 
         window.openDomesticLeagueManager = function() {
-            if (!isAuthorizedAdmin()) {
+            if (!adminActionAllowed()) {
                 showToast('Solo el administrador puede configurar las ligas.');
                 return;
             }
@@ -3701,7 +3728,7 @@
         };
 
         window.saveDomesticLeagueSetup = async function() {
-            if (!isAuthorizedAdmin()) {
+            if (!adminActionAllowed()) {
                 showToast('Solo el administrador puede configurar las ligas.');
                 return;
             }
@@ -3789,7 +3816,7 @@
         };
 
         window.renameCurrentLeague = async function() {
-            if (!isAuthorizedAdmin()) {
+            if (!adminActionAllowed()) {
                 showToast('Solo el administrador puede renombrar temporadas.');
                 return;
             }
@@ -3871,7 +3898,7 @@
         };
 
         window.renameCurrentElimination = async function() {
-            if (!isAuthorizedAdmin()) {
+            if (!adminActionAllowed()) {
                 showToast('Solo el administrador puede renombrar eliminatorias.');
                 return;
             }
@@ -4108,13 +4135,21 @@
 
         function renderQualificationControls(teamCount = appState?.teams?.length || 0) {
             const isLiga1 = appState?.activeDomesticLeagueId !== 'liga2';
+
             const footer = document.getElementById('qualification-footer');
+            const europeanLegend = document.getElementById('european-qualification-legend');
+            const relegationLegend = document.getElementById('relegation-legend');
+            const promotionLegend = document.getElementById('promotion-legend');
+            const adminControls = document.getElementById('qualification-admin-controls');
 
-            if (footer) {
-                footer.style.display = isLiga1 ? '' : 'none';
-            }
+            if (footer) footer.style.display = '';
 
-            // Liga 2 no muestra ni permite configurar cupos europeos.
+            europeanLegend?.classList.toggle('hidden', !isLiga1);
+            relegationLegend?.classList.toggle('hidden', !isLiga1);
+            promotionLegend?.classList.toggle('hidden', isLiga1);
+            adminControls?.classList.toggle('hidden', !isLiga1);
+
+            // Liga 2 solo muestra "Ascenso"; no tiene cupos europeos.
             if (!isLiga1) return;
 
             const slots = getQualificationSlots();
@@ -4141,7 +4176,7 @@
         }
 
         window.updateQualificationSlots = async function() {
-            if (!isAuthorizedAdmin()) {
+            if (!adminActionAllowed()) {
                 showToast('Solo el administrador puede cambiar los cupos europeos.');
                 renderQualificationControls();
                 return;
@@ -4189,11 +4224,27 @@
             standings.forEach((team, index) => {
                 const row = document.createElement('tr');
                 let rowRankClass = "rank-none";
-                if (index < championsSlots) {
-                    rowRankClass = "rank-champions";
-                } else if (index < championsSlots + europaSlots) {
-                    rowRankClass = "rank-europa";
+                const isLiga2 = appState?.activeDomesticLeagueId === 'liga2';
+
+                if (isLiga2) {
+                    // Liga 2: el líder asciende.
+                    if (index === 0) {
+                        rowRankClass = "rank-promotion";
+                    }
+                } else {
+                    // Liga 1: Champions / Europa.
+                    if (index < championsSlots) {
+                        rowRankClass = "rank-champions";
+                    } else if (index < championsSlots + europaSlots) {
+                        rowRankClass = "rank-europa";
+                    }
+
+                    // El último siempre desciende y la raya roja tiene prioridad.
+                    if (index === standings.length - 1) {
+                        rowRankClass = "rank-relegation";
+                    }
                 }
+
                 row.className = `hover:bg-slate-50 transition-colors even:bg-slate-50/50 ${rowRankClass}`;
                 let rankClass = "text-slate-600"; let bgClass = "bg-slate-200";
                 if(index === 0) { rankClass = "text-amber-500"; bgClass = "bg-amber-100"; }
@@ -9051,7 +9102,10 @@
             'saveEditedPlayer', 'startEditPlayer', 'removePlayer', 'handleTransferPhotoFile',
             'restoreRecoveredLeagueToFirebase',
             'onTransferPlayerChange', 'onTransferImageUrlInput', 'handleAwardTrophyFile',
-            'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup'
+            'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup',
+            'renameCurrentLeague', 'renameCurrentElimination',
+            'openDomesticLeagueManager', 'saveDomesticLeagueSetup',
+            'updateQualificationSlots'
         ];
 
         function adminActionAllowed() {
