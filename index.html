@@ -2635,7 +2635,7 @@
                                 </button>
                                 <div class="min-w-0">
                                     <div id="club-music-track-label" class="club-music-track">Música del equipo</div>
-                                    <input id="club-music-volume" type="range" min="0" max="100" step="1" value="35"
+                                    <input id="club-music-volume" type="range" min="0" max="100" step="1" value="18"
                                         oninput="setClubMusicVolume(this.value)" class="club-music-volume" aria-label="Volumen de la música">
                                 </div>
                             </div>
@@ -3258,11 +3258,13 @@
         const savedClubMusicVolume = Number(localStorage.getItem(CLUB_MUSIC_VOLUME_KEY));
         const initialClubMusicVolume = Number.isFinite(savedClubMusicVolume)
             ? Math.min(1, Math.max(0, savedClubMusicVolume))
-            : 0.35;
-        const initialClubMusicMuted = localStorage.getItem(CLUB_MUSIC_MUTED_KEY) === '1';
+            : 0.18;
+
+        // La música entra con sonido. El mute es solo temporal para la sesión actual.
+        const initialClubMusicMuted = false;
 
         clubMusicAudio.volume = initialClubMusicVolume;
-        clubMusicAudio.muted = initialClubMusicMuted;
+        clubMusicAudio.muted = false;
         let currentTrophyTeamId = null;
         let editingTeamTrophyId = null;
         let unsubscribe = null;
@@ -5216,8 +5218,9 @@
         };
 
         window.toggleClubMusicMute = function() {
+            // El espectador puede mutear durante su visita,
+            // pero al volver a entrar la música arrancará con sonido.
             clubMusicAudio.muted = !clubMusicAudio.muted;
-            localStorage.setItem(CLUB_MUSIC_MUTED_KEY, clubMusicAudio.muted ? '1' : '0');
             updateClubMusicControls();
         };
 
@@ -5227,7 +5230,6 @@
             localStorage.setItem(CLUB_MUSIC_VOLUME_KEY, String(normalized));
             if (normalized > 0 && clubMusicAudio.muted) {
                 clubMusicAudio.muted = false;
-                localStorage.setItem(CLUB_MUSIC_MUTED_KEY, '0');
             }
             updateClubMusicControls();
         };
@@ -6012,6 +6014,7 @@
             selectedClubTeamId = teamId || null;
             clubSubtab = 'resumen';
             clubMusicUserPaused = false;
+            clubMusicAudio.muted = false;
             renderClubPage();
             syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
         };
@@ -7893,6 +7896,12 @@
             }
             if(tabName === 'club') {
                 clubMusicUserPaused = false;
+
+                // Entrada a Página Equipo: nunca arranca muteado.
+                // Se conserva el volumen que el usuario haya elegido,
+                // y si nunca eligió uno, será 18%.
+                clubMusicAudio.muted = false;
+
                 renderClubPage();
                 syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
             } else {
