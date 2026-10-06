@@ -2025,6 +2025,104 @@
             color: #86efac !important;
         }
 
+    
+        /* ---------- MÚSICA POR EQUIPO ---------- */
+        .club-music-controls {
+            display: flex;
+            align-items: center;
+            gap: .45rem;
+            min-height: 42px;
+            padding: .38rem .55rem;
+            border: 1px solid #cbd5e1;
+            border-radius: .75rem;
+            background: rgba(255,255,255,.94);
+            box-shadow: 0 1px 2px rgba(15,23,42,.05);
+        }
+        .club-music-controls.hidden {
+            display: none !important;
+        }
+        .club-music-track {
+            max-width: 145px;
+            min-width: 0;
+            font-size: 10px;
+            line-height: 1.15;
+            color: #475569;
+            font-weight: 800;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .club-music-control-btn {
+            width: 31px;
+            height: 31px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: .6rem;
+            background: #0f172a;
+            color: white;
+            transition: .15s ease;
+            flex: 0 0 auto;
+        }
+        .club-music-control-btn:hover {
+            background: #334155;
+            transform: translateY(-1px);
+        }
+        .club-music-volume {
+            width: 78px;
+            accent-color: #4f46e5;
+            cursor: pointer;
+        }
+        .club-music-admin-btn {
+            background: #7c3aed;
+            color: white;
+        }
+        .club-music-admin-btn:hover {
+            background: #6d28d9;
+        }
+        .club-music-editor-note {
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1e3a8a;
+            border-radius: .8rem;
+            padding: .75rem .9rem;
+            font-size: 11px;
+            line-height: 1.45;
+        }
+        .club-music-file-name {
+            min-height: 38px;
+            display: flex;
+            align-items: center;
+            padding: .5rem .7rem;
+            border: 1px dashed #cbd5e1;
+            border-radius: .65rem;
+            background: #f8fafc;
+            color: #64748b;
+            font-size: 11px;
+            overflow-wrap: anywhere;
+        }
+        html.dark .club-music-controls {
+            background: rgba(15,23,42,.95);
+            border-color: #475569;
+        }
+        html.dark .club-music-track {
+            color: #cbd5e1;
+        }
+        html.dark .club-music-file-name {
+            background: #0f172a;
+            border-color: #475569;
+            color: #cbd5e1;
+        }
+        html.dark .club-music-editor-note {
+            background: rgba(30,58,138,.25);
+            border-color: #1d4ed8;
+            color: #bfdbfe;
+        }
+        @media (max-width: 640px) {
+            .club-music-track { max-width: 100px; }
+            .club-music-volume { width: 66px; }
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2527,6 +2625,25 @@
                                 <label for="club-team-select" class="block text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Equipo</label>
                                 <select id="club-team-select" onchange="changeClubTeam(this.value)" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg p-2.5 font-semibold focus:ring-indigo-500 focus:border-indigo-500"></select>
                             </div>
+
+                            <div id="club-music-public-controls" class="club-music-controls hidden" title="Controles de música de este equipo">
+                                <button id="club-music-play-btn" type="button" onclick="toggleClubMusicPlayback()" class="club-music-control-btn" aria-label="Reproducir o pausar música">
+                                    <i class="fa-solid fa-play"></i>
+                                </button>
+                                <button id="club-music-mute-btn" type="button" onclick="toggleClubMusicMute()" class="club-music-control-btn" aria-label="Silenciar música">
+                                    <i class="fa-solid fa-volume-high"></i>
+                                </button>
+                                <div class="min-w-0">
+                                    <div id="club-music-track-label" class="club-music-track">Música del equipo</div>
+                                    <input id="club-music-volume" type="range" min="0" max="100" step="1" value="35"
+                                        oninput="setClubMusicVolume(this.value)" class="club-music-volume" aria-label="Volumen de la música">
+                                </div>
+                            </div>
+
+                            <button data-admin-only onclick="openClubMusicManager()" class="club-music-admin-btn font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Configurar música de este equipo">
+                                <i class="fa-solid fa-music"></i> Música
+                            </button>
+
                             <button onclick="openBackgroundManager('club')" class="background-btn font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Cambiar fondo de Página de Equipo">
                                 <i class="fa-solid fa-image"></i> Fondo
                             </button>
@@ -2821,6 +2938,92 @@
         </div>
     </div>
 
+
+    <!-- Modal: Música de Página de Equipo -->
+    <div id="club-music-modal" class="modal-overlay">
+        <div class="bg-white rounded-xl shadow-2xl w-[94%] max-w-2xl max-h-[92vh] flex flex-col overflow-hidden">
+            <div class="bg-violet-800 p-4 flex justify-between items-center text-white shrink-0">
+                <div>
+                    <h3 id="club-music-modal-title" class="font-bold text-lg">Música del Equipo</h3>
+                    <p class="text-xs text-violet-100 mt-0.5">Configura una canción distinta para cada club.</p>
+                </div>
+                <button onclick="closeClubMusicManager()" class="hover:text-violet-200"><i class="fa-solid fa-xmark fa-lg"></i></button>
+            </div>
+
+            <div class="p-5 flex-1 overflow-y-auto">
+                <div class="club-music-editor-note mb-4">
+                    <i class="fa-solid fa-circle-info mr-1"></i>
+                    Puedes usar una URL directa de audio (MP3, M4A, OGG, WAV, etc.) o subir un archivo a Firebase Storage.
+                    Los enlaces normales de YouTube o Spotify no son archivos de audio directos.
+                </div>
+
+                <div class="grid grid-cols-1 gap-4">
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Nombre visible de la canción</label>
+                        <input id="club-music-title-input" type="text" placeholder="Ej. Billie Jean · Michael Jackson"
+                            class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-violet-400">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">URL directa del audio</label>
+                        <input id="club-music-url-input" type="url" placeholder="https://.../cancion.mp3"
+                            class="w-full border border-slate-300 rounded-lg p-2.5 text-sm outline-none focus:ring-2 focus:ring-violet-400">
+                    </div>
+
+                    <div>
+                        <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">O subir archivo</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <label class="cursor-pointer bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold transition-colors text-center shrink-0">
+                                <i class="fa-solid fa-upload mr-1"></i> Elegir audio
+                                <input id="club-music-file-input" type="file" accept="audio/*,.mp3,.m4a,.ogg,.wav,.aac,.flac" class="hidden" onchange="handleClubMusicFileSelect(this)">
+                            </label>
+                            <div id="club-music-file-name" class="club-music-file-name flex-1">Ningún archivo nuevo seleccionado</div>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Empezar en (segundos)</label>
+                            <input id="club-music-start-input" type="number" min="0" step="0.1" value="0"
+                                class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-violet-400">
+                            <p class="text-[10px] text-slate-400 mt-1">Ejemplo: 42.5 empieza en 00:42.5.</p>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Terminar en (segundos)</label>
+                            <input id="club-music-end-input" type="number" min="0" step="0.1" placeholder="Vacío = hasta el final"
+                                class="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-semibold outline-none focus:ring-2 focus:ring-violet-400">
+                            <p class="text-[10px] text-slate-400 mt-1">Al llegar aquí, vuelve al segundo inicial.</p>
+                        </div>
+                    </div>
+
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                        <div class="text-xs font-bold text-slate-700 mb-2"><i class="fa-solid fa-headphones mr-1"></i> Probar fragmento</div>
+                        <div class="flex flex-wrap gap-2">
+                            <button type="button" onclick="previewClubMusicConfig()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-bold">
+                                <i class="fa-solid fa-play mr-1"></i> Escuchar
+                            </button>
+                            <button type="button" onclick="stopClubMusicPreview()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-2 rounded-lg text-xs font-bold">
+                                <i class="fa-solid fa-stop mr-1"></i> Detener
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:justify-between gap-2 shrink-0">
+                <button type="button" onclick="removeClubMusicConfig()" class="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 px-4 py-2.5 rounded-lg text-sm font-bold">
+                    <i class="fa-solid fa-trash mr-1"></i> Quitar música
+                </button>
+                <div class="flex gap-2 justify-end">
+                    <button type="button" onclick="closeClubMusicManager()" class="bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 px-4 py-2.5 rounded-lg text-sm font-bold">Cancelar</button>
+                    <button id="club-music-save-btn" type="button" onclick="saveClubMusicConfig()" class="bg-violet-600 hover:bg-violet-700 text-white px-4 py-2.5 rounded-lg text-sm font-bold">
+                        <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar música
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Modal: Historial de Ligas / Eliminatorias -->
     <div id="history-modal" class="modal-overlay">
         <div class="bg-white rounded-xl shadow-2xl w-[92%] max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
@@ -2998,6 +3201,7 @@
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, setDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, deleteObject } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-storage.js";
 
         const appId = 'liga-master-9';
         const firebaseConfig = {
@@ -3036,6 +3240,29 @@
         let selectedClubTeamId = null;
         let clubSubtab = 'resumen';
         let clubPhaseFilter = 'todos';
+
+        const CLUB_MUSIC_VOLUME_KEY = 'ligaPyaClubMusicVolume';
+        const CLUB_MUSIC_MUTED_KEY = 'ligaPyaClubMusicMuted';
+        const clubMusicAudio = new Audio();
+        clubMusicAudio.preload = 'auto';
+        clubMusicAudio.playsInline = true;
+
+        let clubMusicCurrentTeamId = null;
+        let clubMusicCurrentUrl = '';
+        let clubMusicPendingStart = 0;
+        let clubMusicUserPaused = false;
+        let clubMusicSelectedFile = null;
+        let clubMusicPreviewAudio = null;
+        let clubMusicPreviewObjectUrl = null;
+
+        const savedClubMusicVolume = Number(localStorage.getItem(CLUB_MUSIC_VOLUME_KEY));
+        const initialClubMusicVolume = Number.isFinite(savedClubMusicVolume)
+            ? Math.min(1, Math.max(0, savedClubMusicVolume))
+            : 0.35;
+        const initialClubMusicMuted = localStorage.getItem(CLUB_MUSIC_MUTED_KEY) === '1';
+
+        clubMusicAudio.volume = initialClubMusicVolume;
+        clubMusicAudio.muted = initialClubMusicMuted;
         let currentTrophyTeamId = null;
         let editingTeamTrophyId = null;
         let unsubscribe = null;
@@ -3043,6 +3270,7 @@
         
         let db;
         let auth;
+        let storage;
         let isAdmin = false;
         let cloudDocRef = null;
         let lastCloudSnapshot = null;
@@ -4821,6 +5049,511 @@
         };
 
 
+
+        function normalizeClubMusicConfig(team) {
+            const source = team?.clubMusic && typeof team.clubMusic === 'object' ? team.clubMusic : {};
+            const start = Math.max(0, Number(source.start) || 0);
+            const parsedEnd = Number(source.end);
+            const end = Number.isFinite(parsedEnd) && parsedEnd > start ? parsedEnd : null;
+
+            return {
+                url: String(source.url || '').trim(),
+                title: String(source.title || '').trim(),
+                start,
+                end,
+                storagePath: String(source.storagePath || '').trim(),
+                fileName: String(source.fileName || '').trim()
+            };
+        }
+
+        function getSelectedClubTeam() {
+            return appState?.teams?.find(team => team.id === selectedClubTeamId) || null;
+        }
+
+        function getClubMusicFragmentLabel(config) {
+            const format = value => {
+                const total = Math.max(0, Number(value) || 0);
+                const mins = Math.floor(total / 60);
+                const secs = (total % 60).toFixed(total % 1 ? 1 : 0).padStart(2, '0');
+                return `${mins}:${secs}`;
+            };
+            if (!config?.url) return '';
+            return config.end ? `${format(config.start)}–${format(config.end)}` : `desde ${format(config.start)}`;
+        }
+
+        function updateClubMusicControls(team = getSelectedClubTeam()) {
+            const controls = document.getElementById('club-music-public-controls');
+            const playBtn = document.getElementById('club-music-play-btn');
+            const muteBtn = document.getElementById('club-music-mute-btn');
+            const volume = document.getElementById('club-music-volume');
+            const label = document.getElementById('club-music-track-label');
+            if (!controls) return;
+
+            const config = normalizeClubMusicConfig(team);
+            const hasMusic = !!config.url;
+            controls.classList.toggle('hidden', !hasMusic);
+
+            if (!hasMusic) return;
+
+            if (label) {
+                const title = config.title || config.fileName || 'Música del equipo';
+                label.textContent = `${title} · ${getClubMusicFragmentLabel(config)}`;
+                label.title = label.textContent;
+            }
+
+            if (volume) {
+                volume.value = String(Math.round(clubMusicAudio.volume * 100));
+                volume.title = `Volumen: ${Math.round(clubMusicAudio.volume * 100)}%`;
+            }
+
+            if (muteBtn) {
+                const icon = muteBtn.querySelector('i');
+                if (icon) {
+                    icon.className = clubMusicAudio.muted || clubMusicAudio.volume === 0
+                        ? 'fa-solid fa-volume-xmark'
+                        : clubMusicAudio.volume < 0.5
+                            ? 'fa-solid fa-volume-low'
+                            : 'fa-solid fa-volume-high';
+                }
+                muteBtn.title = clubMusicAudio.muted ? 'Activar sonido' : 'Silenciar música';
+            }
+
+            if (playBtn) {
+                const icon = playBtn.querySelector('i');
+                if (icon) icon.className = clubMusicAudio.paused ? 'fa-solid fa-play' : 'fa-solid fa-pause';
+                playBtn.title = clubMusicAudio.paused ? 'Reproducir música' : 'Pausar música';
+            }
+        }
+
+        function seekClubMusicToConfiguredStart(config) {
+            if (!config?.url) return;
+            const start = Math.max(0, Number(config.start) || 0);
+            clubMusicPendingStart = start;
+
+            const applySeek = () => {
+                try {
+                    const maxStart = Number.isFinite(clubMusicAudio.duration)
+                        ? Math.min(start, Math.max(0, clubMusicAudio.duration - 0.05))
+                        : start;
+                    clubMusicAudio.currentTime = maxStart;
+                } catch (_) {}
+            };
+
+            if (clubMusicAudio.readyState >= 1) applySeek();
+            else clubMusicAudio.addEventListener('loadedmetadata', applySeek, { once: true });
+        }
+
+        async function tryPlayClubMusic() {
+            if (!clubMusicCurrentUrl || clubMusicUserPaused) {
+                updateClubMusicControls();
+                return false;
+            }
+
+            try {
+                await clubMusicAudio.play();
+                updateClubMusicControls();
+                return true;
+            } catch (error) {
+                // Los navegadores pueden bloquear autoplay hasta que haya una interacción.
+                console.info('El navegador bloqueó el autoplay de música del equipo:', error?.message || error);
+                updateClubMusicControls();
+                return false;
+            }
+        }
+
+        function syncClubMusicForSelectedTeam({ autoplay = false, restart = false } = {}) {
+            const team = getSelectedClubTeam();
+            const config = normalizeClubMusicConfig(team);
+
+            if (!team || !config.url) {
+                clubMusicAudio.pause();
+                clubMusicAudio.removeAttribute('src');
+                clubMusicAudio.load();
+                clubMusicCurrentTeamId = team?.id || null;
+                clubMusicCurrentUrl = '';
+                updateClubMusicControls(team);
+                return;
+            }
+
+            const sourceChanged = clubMusicCurrentTeamId !== team.id || clubMusicCurrentUrl !== config.url;
+            if (sourceChanged) {
+                clubMusicAudio.pause();
+                clubMusicCurrentTeamId = team.id;
+                clubMusicCurrentUrl = config.url;
+                clubMusicAudio.src = config.url;
+                clubMusicAudio.load();
+                seekClubMusicToConfiguredStart(config);
+            } else if (restart) {
+                seekClubMusicToConfiguredStart(config);
+            }
+
+            updateClubMusicControls(team);
+
+            if (autoplay && !clubMusicUserPaused) {
+                tryPlayClubMusic();
+            }
+        }
+
+        function stopClubMusicForLeavingPage() {
+            clubMusicAudio.pause();
+            updateClubMusicControls();
+        }
+
+        window.toggleClubMusicPlayback = function() {
+            const team = getSelectedClubTeam();
+            const config = normalizeClubMusicConfig(team);
+            if (!config.url) return;
+
+            if (clubMusicAudio.paused) {
+                clubMusicUserPaused = false;
+                if (!clubMusicCurrentUrl) syncClubMusicForSelectedTeam({ autoplay: false, restart: true });
+                tryPlayClubMusic();
+            } else {
+                clubMusicUserPaused = true;
+                clubMusicAudio.pause();
+                updateClubMusicControls(team);
+            }
+        };
+
+        window.toggleClubMusicMute = function() {
+            clubMusicAudio.muted = !clubMusicAudio.muted;
+            localStorage.setItem(CLUB_MUSIC_MUTED_KEY, clubMusicAudio.muted ? '1' : '0');
+            updateClubMusicControls();
+        };
+
+        window.setClubMusicVolume = function(value) {
+            const normalized = Math.min(1, Math.max(0, (Number(value) || 0) / 100));
+            clubMusicAudio.volume = normalized;
+            localStorage.setItem(CLUB_MUSIC_VOLUME_KEY, String(normalized));
+            if (normalized > 0 && clubMusicAudio.muted) {
+                clubMusicAudio.muted = false;
+                localStorage.setItem(CLUB_MUSIC_MUTED_KEY, '0');
+            }
+            updateClubMusicControls();
+        };
+
+        clubMusicAudio.addEventListener('play', () => updateClubMusicControls());
+        clubMusicAudio.addEventListener('pause', () => updateClubMusicControls());
+        clubMusicAudio.addEventListener('volumechange', () => updateClubMusicControls());
+
+        clubMusicAudio.addEventListener('timeupdate', () => {
+            const team = getSelectedClubTeam();
+            if (!team || team.id !== clubMusicCurrentTeamId) return;
+
+            const config = normalizeClubMusicConfig(team);
+            if (!config.url || !config.end) return;
+
+            if (clubMusicAudio.currentTime >= config.end - 0.08) {
+                try {
+                    clubMusicAudio.currentTime = config.start;
+                    if (!clubMusicUserPaused && document.getElementById('tab-club')?.classList.contains('active')) {
+                        clubMusicAudio.play().catch(() => {});
+                    }
+                } catch (_) {}
+            }
+        });
+
+        clubMusicAudio.addEventListener('ended', () => {
+            const team = getSelectedClubTeam();
+            const config = normalizeClubMusicConfig(team);
+            if (!config.url || clubMusicUserPaused || !document.getElementById('tab-club')?.classList.contains('active')) return;
+
+            try {
+                clubMusicAudio.currentTime = config.start;
+                clubMusicAudio.play().catch(() => {});
+            } catch (_) {}
+        });
+
+        function cleanupClubMusicPreview() {
+            if (clubMusicPreviewAudio) {
+                clubMusicPreviewAudio.pause();
+                clubMusicPreviewAudio.src = '';
+                clubMusicPreviewAudio = null;
+            }
+            if (clubMusicPreviewObjectUrl) {
+                URL.revokeObjectURL(clubMusicPreviewObjectUrl);
+                clubMusicPreviewObjectUrl = null;
+            }
+        }
+
+        window.stopClubMusicPreview = function() {
+            cleanupClubMusicPreview();
+        };
+
+        window.openClubMusicManager = function() {
+            if (!adminActionAllowed()) {
+                showToast('Solo el administrador puede editar la música del equipo');
+                return;
+            }
+
+            const team = getSelectedClubTeam();
+            if (!team) {
+                showToast('Selecciona un equipo primero');
+                return;
+            }
+
+            const config = normalizeClubMusicConfig(team);
+            clubMusicSelectedFile = null;
+            cleanupClubMusicPreview();
+
+            const modal = document.getElementById('club-music-modal');
+            document.getElementById('club-music-modal-title').textContent = `Música: ${team.name}`;
+            document.getElementById('club-music-title-input').value = config.title;
+            document.getElementById('club-music-url-input').value = config.url;
+            document.getElementById('club-music-start-input').value = String(config.start || 0);
+            document.getElementById('club-music-end-input').value = config.end ?? '';
+            document.getElementById('club-music-file-input').value = '';
+            document.getElementById('club-music-file-name').textContent =
+                config.fileName ? `Actual: ${config.fileName}` : 'Ningún archivo nuevo seleccionado';
+
+            modal.classList.add('active');
+        };
+
+        window.closeClubMusicManager = function() {
+            cleanupClubMusicPreview();
+            clubMusicSelectedFile = null;
+            document.getElementById('club-music-modal')?.classList.remove('active');
+        };
+
+        window.handleClubMusicFileSelect = function(input) {
+            if (!adminActionAllowed()) return;
+
+            const file = input?.files?.[0] || null;
+            clubMusicSelectedFile = file;
+            const label = document.getElementById('club-music-file-name');
+
+            if (!file) {
+                if (label) label.textContent = 'Ningún archivo nuevo seleccionado';
+                return;
+            }
+
+            if (!file.type.startsWith('audio/') && !/\.(mp3|m4a|ogg|wav|aac|flac)$/i.test(file.name)) {
+                clubMusicSelectedFile = null;
+                input.value = '';
+                if (label) label.textContent = 'El archivo seleccionado no parece ser audio';
+                showToast('Selecciona un archivo de audio válido');
+                return;
+            }
+
+            const maxBytes = 60 * 1024 * 1024;
+            if (file.size > maxBytes) {
+                clubMusicSelectedFile = null;
+                input.value = '';
+                if (label) label.textContent = 'Archivo demasiado grande';
+                showToast('El audio debe pesar 60 MB o menos');
+                return;
+            }
+
+            if (label) {
+                const mb = (file.size / 1024 / 1024).toFixed(1);
+                label.textContent = `${file.name} · ${mb} MB`;
+            }
+        };
+
+        function getClubMusicEditorFragment() {
+            const start = Math.max(0, Number(document.getElementById('club-music-start-input')?.value) || 0);
+            const rawEnd = document.getElementById('club-music-end-input')?.value;
+            const parsedEnd = rawEnd === '' ? null : Number(rawEnd);
+            const end = Number.isFinite(parsedEnd) && parsedEnd > start ? parsedEnd : null;
+            return { start, end };
+        }
+
+        window.previewClubMusicConfig = function() {
+            cleanupClubMusicPreview();
+
+            const urlInput = document.getElementById('club-music-url-input')?.value?.trim() || '';
+            let previewUrl = urlInput;
+
+            if (clubMusicSelectedFile) {
+                clubMusicPreviewObjectUrl = URL.createObjectURL(clubMusicSelectedFile);
+                previewUrl = clubMusicPreviewObjectUrl;
+            }
+
+            if (!previewUrl) {
+                showToast('Pon una URL o selecciona un archivo de audio');
+                return;
+            }
+
+            const { start, end } = getClubMusicEditorFragment();
+            const rawEnd = document.getElementById('club-music-end-input')?.value;
+            if (rawEnd !== '' && (!Number.isFinite(Number(rawEnd)) || Number(rawEnd) <= start)) {
+                showToast('El segundo final debe ser mayor que el segundo inicial');
+                return;
+            }
+
+            clubMusicPreviewAudio = new Audio(previewUrl);
+            clubMusicPreviewAudio.volume = clubMusicAudio.volume;
+            clubMusicPreviewAudio.muted = false;
+
+            const begin = () => {
+                try { clubMusicPreviewAudio.currentTime = start; } catch (_) {}
+                clubMusicPreviewAudio.play().catch(() => showToast('No se pudo reproducir esta fuente de audio'));
+            };
+
+            clubMusicPreviewAudio.addEventListener('loadedmetadata', begin, { once: true });
+            clubMusicPreviewAudio.addEventListener('timeupdate', () => {
+                if (end && clubMusicPreviewAudio && clubMusicPreviewAudio.currentTime >= end) {
+                    clubMusicPreviewAudio.pause();
+                }
+            });
+
+            // Para blobs locales algunos navegadores ya están listos inmediatamente.
+            if (clubMusicPreviewAudio.readyState >= 1) begin();
+        };
+
+        function safeClubMusicFileName(name) {
+            return String(name || 'audio')
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^a-zA-Z0-9._-]+/g, '_')
+                .replace(/^_+|_+$/g, '')
+                .slice(0, 100) || 'audio';
+        }
+
+        async function uploadClubMusicFile(team, file) {
+            if (!storage) throw new Error('Firebase Storage no está disponible');
+
+            const clubKey = safeClubMusicFileName(team.clubKey || team.id || 'equipo');
+            const filename = safeClubMusicFileName(file.name);
+            const path = `club-music/${clubKey}/${Date.now()}_${filename}`;
+            const objectRef = storageRef(storage, path);
+
+            const snapshot = await uploadBytes(objectRef, file, {
+                contentType: file.type || 'audio/mpeg',
+                customMetadata: {
+                    teamId: String(team.id || ''),
+                    teamName: String(team.name || '')
+                }
+            });
+
+            const url = await getDownloadURL(snapshot.ref);
+            return { url, storagePath: path, fileName: file.name };
+        }
+
+        window.saveClubMusicConfig = async function() {
+            if (!adminActionAllowed()) {
+                showToast('Solo el administrador puede guardar música');
+                return;
+            }
+
+            const team = getSelectedClubTeam();
+            if (!team) return;
+
+            const title = document.getElementById('club-music-title-input')?.value?.trim() || '';
+            let url = document.getElementById('club-music-url-input')?.value?.trim() || '';
+            const { start, end } = getClubMusicEditorFragment();
+            const rawEnd = document.getElementById('club-music-end-input')?.value;
+            if (rawEnd !== '' && (!Number.isFinite(Number(rawEnd)) || Number(rawEnd) <= start)) {
+                showToast('El segundo final debe ser mayor que el segundo inicial');
+                return;
+            }
+
+            const previous = normalizeClubMusicConfig(team);
+            let storagePath = previous.storagePath;
+            let fileName = previous.fileName;
+
+            const saveBtn = document.getElementById('club-music-save-btn');
+            if (saveBtn) {
+                saveBtn.disabled = true;
+                saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin mr-1"></i> Guardando...';
+            }
+
+            try {
+                if (clubMusicSelectedFile) {
+                    showToast('Subiendo audio...');
+                    const uploaded = await uploadClubMusicFile(team, clubMusicSelectedFile);
+                    url = uploaded.url;
+                    storagePath = uploaded.storagePath;
+                    fileName = uploaded.fileName;
+                } else if (url && url !== previous.url) {
+                    // Si se pega una URL externa, deja de asociarse el archivo anterior de Storage.
+                    storagePath = '';
+                    fileName = '';
+                }
+
+                if (!url) {
+                    showToast('Pon una URL o selecciona un archivo de audio');
+                    return;
+                }
+
+                team.clubMusic = {
+                    url,
+                    title,
+                    start,
+                    end,
+                    storagePath,
+                    fileName,
+                    updatedAt: new Date().toISOString()
+                };
+
+                const saved = await saveToFirestore();
+                if (!saved) {
+                    throw new Error('No se pudo guardar la configuración en Firestore');
+                }
+
+                // Intentamos borrar el archivo anterior si fue reemplazado por otro upload.
+                if (previous.storagePath && previous.storagePath !== storagePath && storage) {
+                    deleteObject(storageRef(storage, previous.storagePath)).catch(() => {});
+                }
+
+                closeClubMusicManager();
+                clubMusicUserPaused = false;
+                renderClubPage();
+                syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
+                showToast(`Música de ${team.name} guardada`);
+            } catch (error) {
+                console.error('Error guardando música del equipo:', error);
+                const message = String(error?.code || error?.message || '');
+                if (message.includes('storage/unauthorized') || message.includes('permission')) {
+                    showToast('Firebase Storage rechazó la subida. Revisa las reglas de Storage.');
+                } else {
+                    showToast('No se pudo guardar/subir el audio. La opción por URL sigue disponible.');
+                }
+            } finally {
+                if (saveBtn) {
+                    saveBtn.disabled = false;
+                    saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-1"></i> Guardar música';
+                }
+            }
+        };
+
+        window.removeClubMusicConfig = async function() {
+            if (!adminActionAllowed()) return;
+
+            const team = getSelectedClubTeam();
+            if (!team) return;
+            const previous = normalizeClubMusicConfig(team);
+
+            if (!previous.url) {
+                closeClubMusicManager();
+                return;
+            }
+
+            if (!confirm(`¿Quitar la música de "${team.name}"?`)) return;
+
+            team.clubMusic = null;
+            const saved = await saveToFirestore();
+            if (!saved) {
+                showToast('No se pudo guardar el cambio');
+                return;
+            }
+
+            if (previous.storagePath && storage) {
+                deleteObject(storageRef(storage, previous.storagePath)).catch(() => {});
+            }
+
+            cleanupClubMusicPreview();
+            clubMusicAudio.pause();
+            clubMusicAudio.removeAttribute('src');
+            clubMusicAudio.load();
+            clubMusicCurrentUrl = '';
+            clubMusicCurrentTeamId = team.id;
+            closeClubMusicManager();
+            renderClubPage();
+            updateClubMusicControls(team);
+            showToast(`Música de ${team.name} eliminada`);
+        };
+
+
         // --- PÁGINA / PERFIL DE EQUIPO ---
         function clubHasScore(value) {
             return value !== null && value !== undefined && value !== '';
@@ -5278,7 +6011,9 @@
         window.changeClubTeam = function(teamId) {
             selectedClubTeamId = teamId || null;
             clubSubtab = 'resumen';
+            clubMusicUserPaused = false;
             renderClubPage();
+            syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
         };
 
         window.switchClubSubtab = function(tabName) {
@@ -5296,8 +6031,10 @@
         window.openClubPage = function(teamId) {
             selectedClubTeamId = teamId || selectedClubTeamId;
             clubSubtab = 'resumen';
+            clubMusicUserPaused = false;
             switchTab('club');
             renderClubPage();
+            syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
         };
 
         function renderClubPage() {
@@ -5380,6 +6117,12 @@
                 <div class="club-subnav-wrap"><div class="club-subnav">${nav.map(([key, icon, label]) => `<button type="button" onclick="switchClubSubtab('${key}')" class="club-subtab-btn ${clubSubtab === key ? 'active' : ''}"><i class="fa-solid ${icon} mr-1.5"></i>${label}</button>`).join('')}</div><div class="club-phase-toolbar"><label for="club-phase-select"><i class="fa-solid fa-filter mr-1"></i>Ver</label><select id="club-phase-select" onchange="switchClubPhase(this.value)" class="club-phase-select"><option value="todos" ${clubPhaseFilter === 'todos' ? 'selected' : ''}>Todas las fases</option><option value="liga" ${clubPhaseFilter === 'liga' ? 'selected' : ''}>Fase Regular (Liga)</option><option value="eliminatoria" ${clubPhaseFilter === 'eliminatoria' ? 'selected' : ''}>${getActiveEliminationEdition()?.name || 'Champions League'} (Eliminatorias)</option></select></div></div>
                 <div class="club-page-body">${bodyHtml}</div>
             </div>`;
+
+            updateClubMusicControls(team);
+            syncClubMusicForSelectedTeam({
+                autoplay: !clubMusicUserPaused && document.getElementById('tab-club')?.classList.contains('active'),
+                restart: false
+            });
         }
 
         function createTwoLeggedBracketMatch(id, next = null, nextPos = null) {
@@ -7149,7 +7892,11 @@
                 renderFace2Face();
             }
             if(tabName === 'club') {
+                clubMusicUserPaused = false;
                 renderClubPage();
+                syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
+            } else {
+                stopClubMusicForLeavingPage();
             }
             if(tabName === 'traspasos') {
                 renderTransfers();
@@ -9292,7 +10039,8 @@
             'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup',
             'renameCurrentLeague', 'renameCurrentElimination',
             'openDomesticLeagueManager', 'saveDomesticLeagueSetup',
-            'updateQualificationSlots'
+            'updateQualificationSlots', 'openClubMusicManager', 'saveClubMusicConfig',
+            'removeClubMusicConfig', 'handleClubMusicFileSelect'
         ];
 
         function adminActionAllowed() {
@@ -9518,6 +10266,7 @@
                 const app = window.firebaseApp = window.firebaseApp || initializeApp(firebaseConfig);
                 auth = getAuth(app);
                 db = getFirestore(app);
+                storage = getStorage(app);
                 cloudDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'leagueData', 'main_data');
 
                 installAdminGuards();
