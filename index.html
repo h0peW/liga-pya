@@ -2286,7 +2286,7 @@
                             </div>
 
                             <div class="competition-switcher rounded-lg px-3 py-2 shadow-sm min-w-[150px]">
-                                <label for="bracket-size-select" class="competition-switcher-label block text-[10px] uppercase tracking-wider font-semibold">Llaves iniciales</label>
+                                <label for="bracket-size-select" class="competition-switcher-label block text-[10px] uppercase tracking-wider font-semibold">Llaves de esta eliminatoria</label>
                                 <select id="bracket-size-select" onchange="changeBracketSize(this.value)" class="competition-switcher-select w-full border-0 p-0 mt-0.5 text-sm font-bold outline-none focus:ring-0">
                                     <option value="1">1 llave · 2 equipos</option>
                                     <option value="2">2 llaves · 4 equipos</option>
@@ -3260,13 +3260,23 @@
             bindDomesticCompetition(league, league.activeDomesticLeagueId || 'liga1');
         }
 
-        function createBracketEdition(name = 'Champions League', bracketData = null) {
+        function normalizeEditionInitialTies(value, fallback = 4) {
+            const parsed = parseInt(value, 10);
+            return [1, 2, 4, 8].includes(parsed) ? parsed : fallback;
+        }
+
+        function createBracketEdition(name = 'Champions League', bracketData = null, initialTies = 4) {
+            const dataInitialTies = bracketData ? getBracketInitialTies(bracketData) : normalizeEditionInitialTies(initialTies, 4);
+            const data = bracketData || initDefaultBracket(dataInitialTies);
+            data.initialTies = dataInitialTies;
+
             return {
                 id: makeId('elim'),
                 name: name || 'Eliminatoria',
                 createdAt: new Date().toISOString(),
                 background: '',
-                data: bracketData || initDefaultBracket()
+                initialTies: dataInitialTies,
+                data
             };
         }
 
@@ -3362,13 +3372,25 @@
                 league.activeBracketId = migratedEdition.id;
             }
 
-            league.bracketEditions = league.bracketEditions.map((edition, index) => ({
-                id: edition.id || makeId('elim'),
-                name: edition.name || `Eliminatoria ${index + 1}`,
-                createdAt: edition.createdAt || new Date().toISOString(),
-                background: edition.background || '',
-                data: normalizeBracketData(edition.data || initDefaultBracket())
-            }));
+            league.bracketEditions = league.bracketEditions.map((edition, index) => {
+                const normalizedData = normalizeBracketData(edition.data || initDefaultBracket());
+                const dataInitialTies = getBracketInitialTies(normalizedData);
+                const editionInitialTies = normalizeEditionInitialTies(edition.initialTies, dataInitialTies);
+
+                // En datos antiguos el formato vivía solo dentro de data.
+                // En los nuevos guardamos también una copia en la edición para
+                // que cada eliminatoria conserve explícitamente su propio formato.
+                normalizedData.initialTies = editionInitialTies;
+
+                return {
+                    id: edition.id || makeId('elim'),
+                    name: edition.name || `Eliminatoria ${index + 1}`,
+                    createdAt: edition.createdAt || new Date().toISOString(),
+                    background: edition.background || '',
+                    initialTies: editionInitialTies,
+                    data: normalizedData
+                };
+            });
 
             let activeEdition = league.bracketEditions.find(e => e.id === league.activeBracketId);
             if (!activeEdition) {
@@ -3482,7 +3504,14 @@
         function syncActiveBracketEdition() {
             if (!appState || !Array.isArray(appState.bracketEditions)) return;
             const edition = appState.bracketEditions.find(e => e.id === appState.activeBracketId);
-            if (edition) edition.data = appState.bracket || initDefaultBracket();
+            if (!edition) return;
+
+            const bracket = appState.bracket || initDefaultBracket();
+            const initialTies = getBracketInitialTies(bracket);
+
+            edition.initialTies = initialTies;
+            bracket.initialTies = initialTies;
+            edition.data = bracket;
         }
 
         function getPersistableState() {
@@ -3507,7 +3536,13 @@
                 const activeEdition = appState.bracketEditions.find(e => e.id === appState.activeBracketId);
                 if (title) title.textContent = activeEdition?.name || 'Eliminatoria';
                 const sizeSelect = document.getElementById('bracket-size-select');
-                if (sizeSelect) sizeSelect.value = String(getBracketInitialTies(appState.bracket));
+                if (sizeSelect) {
+                    const editionSize = normalizeEditionInitialTies(
+                        activeEdition?.initialTies,
+                        getBracketInitialTies(appState.bracket)
+                    );
+                    sizeSelect.value = String(editionSize);
+                }
             }
         }
 
@@ -3969,34 +4004,63 @@
 
         window.createNewElimination = async function() {
             if (window.autoSaveBracket) await window.autoSaveBracket();
+            syncActiveBracketEdition();
+
             const defaultName = `Eliminatoria ${appState.bracketEditions.length + 1}`;
             const name = prompt('Nombre de la nueva eliminatoria:', defaultName);
             if (name === null) return;
             const cleanName = name.trim() || defaultName;
-            const edition = createBracketEdition(cleanName);
+
+            const currentSize = getBracketInitialTies(appState.bracket);
+            const sizeAnswer = prompt(
+                '¿Cuántas llaves iniciales tendrá esta eliminatoria?\n\nOpciones: 8, 4, 2 o 1',
+                String(currentSize)
+            );
+            if (sizeAnswer === null) return;
+
+            const initialTies = parseInt(sizeAnswer, 10);
+            if (![1, 2, 4, 8].includes(initialTies)) {
+                showToast('Cantidad inválida. Usa 8, 4, 2 o 1 llave.');
+                return;
+            }
+
+            const edition = createBracketEdition(cleanName, null, initialTies);
             appState.bracketEditions.push(edition);
             appState.activeBracketId = edition.id;
             appState.bracket = edition.data;
+
             await saveToFirestore();
             renderAll();
-            showToast(`${cleanName} creada`);
+            showToast(`${cleanName} creada con ${initialTies} llave${initialTies === 1 ? '' : 's'} inicial${initialTies === 1 ? '' : 'es'}`);
         };
 
         window.switchEliminationEdition = async function(editionId) {
             if (!editionId || editionId === appState.activeBracketId) return;
+
             if (window.autoSaveBracket) await window.autoSaveBracket();
             syncActiveBracketEdition();
+
             const edition = appState.bracketEditions.find(e => e.id === editionId);
             if (!edition) return;
+
+            const savedSize = normalizeEditionInitialTies(
+                edition.initialTies,
+                getBracketInitialTies(edition.data || initDefaultBracket())
+            );
+
             appState.activeBracketId = edition.id;
-            appState.bracket = normalizeBracketData(edition.data || initDefaultBracket());
+            appState.bracket = normalizeBracketData(edition.data || initDefaultBracket(savedSize));
+            appState.bracket.initialTies = savedSize;
+            edition.initialTies = savedSize;
+            edition.data = appState.bracket;
+
             await saveToFirestore();
             renderCompetitionSelectors();
             renderBracket();
             renderStats();
             renderFace2Face();
             applyCurrentEliminationBackground();
-            showToast(`${edition.name} cargada`);
+            showToast(`${edition.name} cargada · ${savedSize} llave${savedSize === 1 ? '' : 's'}`);
         };
 
         window.deleteElimination = async function(editionId) {
@@ -5446,8 +5510,19 @@
             }
 
             const trophyUrl = appState.bracket?.trophyUrl || '';
+            const tournamentMvp = appState.bracket?.tournamentMvp || null;
+
+            // IMPORTANTE: solo sustituimos el cuadro de la edición activa.
             appState.bracket = initDefaultBracket(newInitialTies);
             appState.bracket.trophyUrl = trophyUrl;
+            appState.bracket.tournamentMvp = tournamentMvp;
+
+            const activeEdition = appState.bracketEditions.find(e => e.id === appState.activeBracketId);
+            if (activeEdition) {
+                activeEdition.initialTies = newInitialTies;
+                activeEdition.data = appState.bracket;
+            }
+
             syncActiveBracketEdition();
             await saveToFirestore();
             renderCompetitionSelectors();
@@ -5579,10 +5654,23 @@
         }
 
         function renderBracket() {
-            if(!appState.bracket) appState.bracket = initDefaultBracket();
+            const activeEdition = appState?.bracketEditions?.find(e => e.id === appState.activeBracketId);
+            const savedInitialTies = normalizeEditionInitialTies(
+                activeEdition?.initialTies,
+                getBracketInitialTies(activeEdition?.data || appState.bracket || initDefaultBracket())
+            );
+
+            if (!appState.bracket) appState.bracket = initDefaultBracket(savedInitialTies);
             appState.bracket = normalizeBracketData(appState.bracket);
+            appState.bracket.initialTies = savedInitialTies;
+
+            if (activeEdition) {
+                activeEdition.initialTies = savedInitialTies;
+                activeEdition.data = appState.bracket;
+            }
+
             const b = appState.bracket;
-            const initialTies = getBracketInitialTies(b);
+            const initialTies = savedInitialTies;
 
             const sizeSelect = document.getElementById('bracket-size-select');
             if (sizeSelect) sizeSelect.value = String(initialTies);
