@@ -5975,7 +5975,7 @@
             const ordered = [...playerStats].sort((a, b) => (parseInt(a.num, 10) || 999) - (parseInt(b.num, 10) || 999) || a.name.localeCompare(b.name, 'es'));
             return `<div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
                 ${ordered.map(player => `<div class="club-player-card">
-                    <img src="${player.img || 'https://placehold.co/96x96/e2e8f0/64748b?text=Jugador'}" class="club-player-avatar" onerror="this.src='https://placehold.co/96x96/e2e8f0/64748b?text=Jugador'">
+                    <img src="${player.img || 'https://placehold.co/96x96/e2e8f0/64748b?text=Jugador'}" referrerpolicy="no-referrer" decoding="async" class="club-player-avatar" onerror="this.onerror=null;this.src='https://placehold.co/96x96/e2e8f0/64748b?text=Jugador'">
                     <div class="min-w-0 flex-1"><div class="flex items-center gap-2"><span class="text-xs font-black text-indigo-600">#${player.num || '—'}</span><span class="font-bold club-player-name truncate">${player.name}</span></div><div class="text-[11px] text-slate-400 mt-1">${player.apps} PJ · ${player.goals} G · ${player.assists} A</div></div>
                     ${player.avgRating > 0 ? `<span class="text-xs font-black bg-sky-100 text-sky-700 px-2 py-1 rounded-lg">${player.avgRating.toFixed(1)}</span>` : ''}
                 </div>`).join('')}
@@ -5990,7 +5990,7 @@
                 <table class="club-stat-table min-w-[720px]">
                     <thead><tr><th>Jugador</th><th>PJ</th><th>Goles</th><th>Asist.</th><th>TA</th><th>TR</th><th>Nota</th><th>MVP</th></tr></thead>
                     <tbody>${ordered.map(player => `<tr>
-                        <td><div class="flex items-center gap-2"><img src="${player.img || 'https://placehold.co/40x40/e2e8f0/64748b?text=?'}" class="w-8 h-8 rounded-full object-cover bg-slate-100 border" onerror="this.src='https://placehold.co/40x40/e2e8f0/64748b?text=?'"><div><div>${player.name}</div><div class="text-[9px] text-slate-400 font-normal">#${player.num || '—'}</div></div></div></td>
+                        <td><div class="flex items-center gap-2"><img src="${player.img || 'https://placehold.co/40x40/e2e8f0/64748b?text=?'}" referrerpolicy="no-referrer" decoding="async" class="w-8 h-8 rounded-full object-cover bg-slate-100 border" onerror="this.onerror=null;this.src='https://placehold.co/40x40/e2e8f0/64748b?text=?'"><div><div>${player.name}</div><div class="text-[9px] text-slate-400 font-normal">#${player.num || '—'}</div></div></div></td>
                         <td>${player.apps}</td><td class="font-bold text-emerald-600">${player.goals}</td><td class="font-bold text-blue-600">${player.assists}</td><td>${player.yellows}</td><td>${player.reds}</td><td>${player.avgRating ? player.avgRating.toFixed(2) : '—'}</td><td>${player.mvpMatch + player.mvpMatchday}</td>
                     </tr>`).join('')}</tbody>
                 </table>
@@ -8908,7 +8908,7 @@
                     return `
                     <li class="p-3 flex items-center gap-3 hover:bg-slate-50 transition-colors border-b border-slate-100 last:border-0" style="border-color: inherit;">
                         <div class="font-bold text-slate-400 w-5 text-center">${i+1}</div>
-                        <img src="${p.img || 'https://placehold.co/40x40/ccc/fff'}" class="w-8 h-8 rounded-full border object-cover">
+                        <img src="${p.img || 'https://placehold.co/40x40/ccc/fff'}" referrerpolicy="no-referrer" decoding="async" class="w-8 h-8 rounded-full border object-cover" onerror="this.onerror=null;this.src='https://placehold.co/40x40/ccc/fff'">
                         <div class="flex-1 min-w-0">
                             <div class="font-semibold text-sm text-slate-800 truncate player-name-stats">${p.name}</div>
                             <div class="text-[10px] text-slate-500 flex items-center gap-1"><img src="${p.teamLogo}" class="w-3 h-3 rounded-full object-contain" onerror="this.src='https://placehold.co/12x12/ccc/fff'"> ${p.teamName}</div>
@@ -10882,9 +10882,11 @@
 
         function prepareAppImage(img) {
             if (!img || img.tagName !== 'IMG') return;
-            if (/^https?:\/\//i.test(img.getAttribute('src') || '')) {
-                img.referrerPolicy = 'no-referrer';
-            }
+
+            // Muchas fotos de jugadores vienen de servidores que bloquean hotlinking.
+            // Forzamos no-referrer también vía propiedad DOM como segunda defensa.
+            img.referrerPolicy = 'no-referrer';
+
             if (!img.hasAttribute('decoding')) {
                 img.decoding = 'async';
             }
