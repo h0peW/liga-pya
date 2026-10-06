@@ -2123,6 +2123,13 @@
             .club-music-volume { width: 66px; }
         }
 
+            /* ---------- OPTIMIZACIÓN DE LISTAS LARGAS ---------- */
+        #players-list > *,
+        .club-page-body > * {
+            content-visibility: auto;
+            contain-intrinsic-size: auto 88px;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -3276,6 +3283,10 @@
         let isAdmin = false;
         let cloudDocRef = null;
         let lastCloudSnapshot = null;
+        let lastCloudSnapshotSignature = '';
+        let firestoreWriteQueue = Promise.resolve();
+        const queuedCloudWritePromises = new Map();
+        const recentLocalWriteSignatures = new Map();
         let adminGuardsInstalled = false;
 
         const loadingScreen = document.getElementById('loading-screen');
@@ -3755,14 +3766,24 @@
             const leagueSelect = document.getElementById('league-season-select');
             if (leagueSelect && rootState) {
                 const ordered = [...rootState.leagues].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                leagueSelect.innerHTML = ordered.map(league => `<option value="${league.id}" ${league.id === appState.id ? 'selected' : ''}>${league.name}</option>`).join('');
+                const signature = JSON.stringify(ordered.map(league => [league.id, league.name]));
+                if (leagueSelect.dataset.optionsSignature !== signature) {
+                    leagueSelect.innerHTML = ordered.map(league => `<option value="${league.id}">${league.name}</option>`).join('');
+                    leagueSelect.dataset.optionsSignature = signature;
+                }
+                leagueSelect.value = appState.id;
             }
 
             const editionSelect = document.getElementById('elimination-edition-select');
             const title = document.getElementById('elimination-title');
             if (editionSelect && appState) {
                 const ordered = [...(appState.bracketEditions || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
-                editionSelect.innerHTML = ordered.map(edition => `<option value="${edition.id}" ${edition.id === appState.activeBracketId ? 'selected' : ''}>${edition.name}</option>`).join('');
+                const signature = JSON.stringify(ordered.map(edition => [edition.id, edition.name]));
+                if (editionSelect.dataset.optionsSignature !== signature) {
+                    editionSelect.innerHTML = ordered.map(edition => `<option value="${edition.id}">${edition.name}</option>`).join('');
+                    editionSelect.dataset.optionsSignature = signature;
+                }
+                editionSelect.value = appState.activeBracketId;
                 const activeEdition = appState.bracketEditions.find(e => e.id === appState.activeBracketId);
                 if (title) title.textContent = activeEdition?.name || 'Eliminatoria';
                 const sizeSelect = document.getElementById('bracket-size-select');
@@ -3813,31 +3834,56 @@
             isEditingFixture = false;
             resetEditButton();
 
-            renderDomesticLeagueControls();
-            renderStandings();
-            renderMatchdaySelect();
-            renderCurrentMatchday();
-            renderStats();
-            renderFace2Face();
-            renderClubPage();
+            renderAll();
 
             showToast(`${competition.name} cargada`);
         };
 
+        function getActiveTabName() {
+            const active = document.querySelector('.tab-content.active');
+            return active?.id?.replace(/^tab-/, '') || 'posiciones';
+        }
+
+        function renderActiveTabContent(tabName = getActiveTabName()) {
+            switch (tabName) {
+                case 'posiciones':
+                    renderStandings();
+                    break;
+                case 'resultados':
+                    renderMatchdaySelect();
+                    renderCurrentMatchday();
+                    break;
+                case 'eliminatoria':
+                    renderBracket();
+                    break;
+                case 'estadisticas':
+                    renderStats();
+                    break;
+                case 'premios':
+                    renderAwards();
+                    break;
+                case 'face2face':
+                    populateFace2FaceTeams();
+                    renderFace2Face();
+                    break;
+                case 'club':
+                    renderClubPage();
+                    break;
+                case 'equipos':
+                    renderTeamsConfig();
+                    break;
+                case 'traspasos':
+                    renderTransfers();
+                    break;
+            }
+        }
+
         function renderAll() {
+            // Actualiza siempre la navegación común, pero solo construye
+            // el contenido pesado de la pestaña que el usuario está viendo.
             renderCompetitionSelectors();
             renderDomesticLeagueControls();
-            renderStandings();
-            renderMatchdaySelect();
-            renderCurrentMatchday();
-            renderTeamsConfig();
-            renderBracket(); 
-            renderStats();
-            populateFace2FaceTeams();
-            renderFace2Face();
-            renderClubPage();
-            renderTransfers();
-            renderAwards();
+            renderActiveTabContent();
             applyCurrentEliminationBackground();
         }
 
@@ -7907,6 +7953,9 @@
             } else {
                 stopClubMusicForLeavingPage();
             }
+            if(tabName === 'equipos') {
+                renderTeamsConfig();
+            }
             if(tabName === 'traspasos') {
                 renderTransfers();
             }
@@ -8382,24 +8431,98 @@
             appState.teams = updatedTeams; await saveToFirestore(); showToast('Equipos actualizados correctamente'); renderAll();
         };
 
-        async function saveToFirestore() {
+        function getCloudStateSignature(data) {
             try {
-                if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) {
-                    showToast("Modo espectador: solo el administrador puede guardar cambios.");
-                    return false;
+                return JSON.stringify(data);
+            } catch (error) {
+                console.warn('No se pudo crear la firma del estado:', error);
+                return '';
+            }
+        }
+
+        function rememberLocalWriteSignature(signature) {
+            if (!signature) return;
+            const now = Date.now();
+            recentLocalWriteSignatures.set(signature, now);
+
+            if (recentLocalWriteSignatures.size > 12) {
+                for (const [key, timestamp] of recentLocalWriteSignatures) {
+                    if (now - timestamp > 15000 || recentLocalWriteSignatures.size > 8) {
+                        recentLocalWriteSignatures.delete(key);
+                    }
                 }
-                const dataToSave = getPersistableState();
-                if (!dataToSave || !db) return false;
-                const docRef = cloudDocRef || doc(db, 'artifacts', appId, 'public', 'data', 'leagueData', 'main_data');
-                await setDoc(docRef, dataToSave);
-                lastCloudSnapshot = deepClone(dataToSave);
-                localStorage.setItem(CLOUD_CACHE_KEY, JSON.stringify(dataToSave));
-                return true;
-            } catch (error) { 
-                console.error("Error saving data:", error); 
-                showToast("Error al guardar en la nube. Revisa Firebase o tu conexión."); 
+            }
+        }
+
+        function isRecentLocalWriteSignature(signature) {
+            if (!signature) return false;
+            const timestamp = recentLocalWriteSignatures.get(signature);
+            if (!timestamp) return false;
+            if (Date.now() - timestamp > 15000) {
+                recentLocalWriteSignatures.delete(signature);
                 return false;
             }
+            return true;
+        }
+
+        async function saveToFirestore() {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) {
+                showToast("Modo espectador: solo el administrador puede guardar cambios.");
+                return false;
+            }
+
+            const dataToSave = getPersistableState();
+            if (!dataToSave || !db) return false;
+
+            const signature = getCloudStateSignature(dataToSave);
+
+            // No enviar dos veces exactamente el mismo estado.
+            if (signature && signature === lastCloudSnapshotSignature) {
+                return true;
+            }
+
+            // Si ya hay una escritura idéntica en cola, reutilizarla.
+            if (signature && queuedCloudWritePromises.has(signature)) {
+                return queuedCloudWritePromises.get(signature);
+            }
+
+            // Copia inmutable: preserva el orden correcto aunque el usuario siga editando.
+            const frozenState = deepClone(dataToSave);
+            const docRef = cloudDocRef || doc(db, 'artifacts', appId, 'public', 'data', 'leagueData', 'main_data');
+            rememberLocalWriteSignature(signature);
+
+            const writeOperation = async () => {
+                if (signature && signature === lastCloudSnapshotSignature) {
+                    return true;
+                }
+
+                try {
+                    await setDoc(docRef, frozenState);
+                    lastCloudSnapshot = frozenState;
+                    lastCloudSnapshotSignature = signature;
+                    safeSetLocalStorage(CLOUD_CACHE_KEY, signature || JSON.stringify(frozenState));
+                    return true;
+                } catch (error) {
+                    recentLocalWriteSignatures.delete(signature);
+                    console.error("Error saving data:", error);
+                    showToast("Error al guardar en la nube. Revisa Firebase o tu conexión.");
+                    return false;
+                }
+            };
+
+            const queuedPromise = firestoreWriteQueue.then(writeOperation, writeOperation);
+            firestoreWriteQueue = queuedPromise.then(() => undefined, () => undefined);
+
+            if (signature) {
+                queuedCloudWritePromises.set(signature, queuedPromise);
+                queuedPromise.finally(() => {
+                    if (queuedCloudWritePromises.get(signature) === queuedPromise) {
+                        queuedCloudWritePromises.delete(signature);
+                    }
+                });
+            }
+
+            return queuedPromise;
         }
 
         // --- SISTEMA DE ESTADÍSTICAS ---
@@ -8549,9 +8672,12 @@
             renderList('top-mvp-match-list', topMvpMatch, 'mvpMatch');
             renderList('top-mvp-matchday-list', topMvpMatchday, 'mvpMatchday');
 
-            // Renderizar el gráfico de Chart.js solo si estamos en fase de liga
+            // Agrupar llamadas rápidas: solo se dibuja el último frame solicitado.
             if (phase === 'liga') {
-                setTimeout(renderChart, 100);
+                scheduleEvolutionChartRender();
+            } else if (evolutionChartRenderFrame !== null) {
+                cancelAnimationFrame(evolutionChartRenderFrame);
+                evolutionChartRenderFrame = null;
             }
         };
 
@@ -9297,8 +9423,14 @@
             if (needsSave) {
                 const dataToSave = getPersistableState();
                 if (!dataToSave || !db) return;
-                localStorage.setItem(CLOUD_CACHE_KEY, JSON.stringify(dataToSave));
+
+                const signature = getCloudStateSignature(dataToSave);
+                safeSetLocalStorage(CLOUD_CACHE_KEY, signature || JSON.stringify(dataToSave));
+
+                if (signature && signature === lastCloudSnapshotSignature) return;
+
                 const docRef = cloudDocRef || doc(db, 'artifacts', appId, 'public', 'data', 'leagueData', 'main_data');
+                rememberLocalWriteSignature(signature);
                 setDoc(docRef, dataToSave).catch(e => console.error("Auto-save al cerrar falló:", e));
             }
         };
@@ -9308,6 +9440,131 @@
 
         // --- SISTEMA DE GRÁFICOS (CHART.JS) ---
         let evolutionChartInstance = null;
+        let evolutionChartRenderFrame = null;
+
+        function scheduleEvolutionChartRender() {
+            if (evolutionChartRenderFrame !== null) {
+                cancelAnimationFrame(evolutionChartRenderFrame);
+            }
+            evolutionChartRenderFrame = requestAnimationFrame(() => {
+                evolutionChartRenderFrame = null;
+                if (document.getElementById('tab-estadisticas')?.classList.contains('active')) {
+                    renderChart();
+                }
+            });
+        }
+
+        function buildStandingsEvolution(maxRoundPlayed) {
+            const activeTeams = getActiveDomesticTeams();
+            const table = {};
+            const history = {};
+
+            activeTeams.forEach(team => {
+                table[team.id] = { ...team, pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dg: 0, pts: 0 };
+                history[team.id] = { label: team.name, logo: team.logo, data: [] };
+            });
+
+            const byRound = new Map();
+            (appState.matches || []).forEach(match => {
+                const round = Number(match.round) || 0;
+                if (round < 1 || round > maxRoundPlayed) return;
+                if (match.homeGoals === null || match.awayGoals === null || match.homeGoals === '' || match.awayGoals === '') return;
+                if (!byRound.has(round)) byRound.set(round, []);
+                byRound.get(round).push(match);
+            });
+
+            for (let round = 1; round <= maxRoundPlayed; round++) {
+                (byRound.get(round) || []).forEach(match => {
+                    const home = table[match.homeId];
+                    const away = table[match.awayId];
+                    if (!home || !away) return;
+
+                    const hG = parseInt(match.homeGoals, 10);
+                    const aG = parseInt(match.awayGoals, 10);
+                    if (!Number.isFinite(hG) || !Number.isFinite(aG)) return;
+
+                    home.pj++; away.pj++;
+                    home.gf += hG; home.gc += aG;
+                    away.gf += aG; away.gc += hG;
+
+                    if (hG > aG) { home.g++; away.p++; home.pts += 3; }
+                    else if (aG > hG) { away.g++; home.p++; away.pts += 3; }
+                    else { home.e++; away.e++; home.pts++; away.pts++; }
+                });
+
+                const standings = Object.values(table)
+                    .map(team => ({ ...team, dg: team.gf - team.gc }))
+                    .sort((a, b) => b.pts - a.pts || b.dg - a.dg || b.gf - a.gf);
+
+                standings.forEach((team, index) => {
+                    if (history[team.id]) history[team.id].data.push(index + 1);
+                });
+            }
+
+            return history;
+        }
+
+        function buildScorerEvolution(maxRoundPlayed) {
+            const players = {};
+            getActiveDomesticTeams().forEach(team => {
+                (team.players || []).forEach(player => {
+                    players[player.id] = {
+                        id: player.id,
+                        name: player.name,
+                        img: player.img || team.logo,
+                        goals: 0
+                    };
+                });
+            });
+
+            const matchesByRound = new Map();
+            (appState.matches || []).forEach(match => {
+                const round = Number(match.round) || 0;
+                if (round < 1 || round > maxRoundPlayed) return;
+                if (!matchesByRound.has(round)) matchesByRound.set(round, []);
+                matchesByRound.get(round).push(match);
+            });
+
+            for (let round = 1; round <= maxRoundPlayed; round++) {
+                (matchesByRound.get(round) || []).forEach(match => {
+                    [match.lineupHome, match.lineupAway].forEach(lineup => {
+                        (lineup || []).forEach(entry => {
+                            if (!entry?.id || !players[entry.id] || !entry.goals) return;
+                            players[entry.id].goals += parseInt(entry.goals, 10) || 0;
+                        });
+                    });
+                });
+            }
+
+            const topScorers = Object.values(players)
+                .filter(player => player.goals > 0)
+                .sort((a, b) => b.goals - a.goals)
+                .slice(0, 10);
+
+            const history = {};
+            const runningGoals = {};
+            topScorers.forEach(player => {
+                history[player.id] = { label: player.name, logo: player.img, data: [] };
+                runningGoals[player.id] = 0;
+            });
+
+            for (let round = 1; round <= maxRoundPlayed; round++) {
+                (matchesByRound.get(round) || []).forEach(match => {
+                    [match.lineupHome, match.lineupAway].forEach(lineup => {
+                        (lineup || []).forEach(entry => {
+                            if (!entry?.id || runningGoals[entry.id] === undefined || !entry.goals) return;
+                            runningGoals[entry.id] += parseInt(entry.goals, 10) || 0;
+                        });
+                    });
+                });
+
+                topScorers.forEach(player => {
+                    history[player.id].data.push(runningGoals[player.id] || 0);
+                });
+            }
+
+            return history;
+        }
 
         window.renderChart = function() {
             const canvas = document.getElementById('evolutionChart');
@@ -9343,14 +9600,7 @@
             ];
 
             if (chartType === 'posiciones') {
-                const teamHistory = {};
-                // AQUÍ: Guardamos también el logo del equipo
-                getActiveDomesticTeams().forEach(t => teamHistory[t.id] = { label: t.name, logo: t.logo, data: [] });
-
-                for (let round = 1; round <= maxRoundPlayed; round++) {
-                    const standings = calculateStandingsUpToRound(round);
-                    standings.forEach((team, index) => { teamHistory[team.id].data.push(index + 1); });
-                }
+                const teamHistory = buildStandingsEvolution(maxRoundPlayed);
 
                 datasets = Object.values(teamHistory).map((th, i) => ({
                     label: th.label,
@@ -9389,19 +9639,7 @@
                     }
                 };
             } else if (chartType === 'goleadores') {
-                const playerHistory = {};
-                const topScorers = calculatePlayerStatsUpToRound(maxRoundPlayed).slice(0, 10);
-                
-                // AQUÍ: Guardamos la foto del jugador para el plugin
-                topScorers.forEach(p => playerHistory[p.id] = { label: p.name, logo: p.img, data: [] });
-
-                for (let round = 1; round <= maxRoundPlayed; round++) {
-                    const scorersUpToRound = calculatePlayerStatsUpToRound(round);
-                    topScorers.forEach(p => {
-                        const pStat = scorersUpToRound.find(s => s.id === p.id);
-                        playerHistory[p.id].data.push(pStat ? pStat.goals : 0);
-                    });
-                }
+                const playerHistory = buildScorerEvolution(maxRoundPlayed);
 
                 datasets = Object.values(playerHistory).map((ph, i) => ({
                     label: ph.label,
@@ -10019,6 +10257,9 @@
                 await backupCloudBeforeDestructiveWrite('firebase-antes-de-restaurar');
                 const recovered = deepClone(RECOVERED_DATA);
                 await setDoc(cloudDocRef, recovered);
+                lastCloudSnapshot = deepClone(recovered);
+                lastCloudSnapshotSignature = getCloudStateSignature(recovered);
+                rememberLocalWriteSignature(lastCloudSnapshotSignature);
                 rootState = normalizeRootState(recovered);
                 activateLeague(rootState.activeLeagueId);
                 lastCloudSnapshot = deepClone(recovered);
@@ -10309,10 +10550,12 @@
                 const docSnap = await getDoc(docRef);
 
                 if (docSnap.exists() && !looksLikeAccidentalEmptyState(docSnap.data())) {
-                    rootState = normalizeRootState(docSnap.data());
-                    lastCloudSnapshot = deepClone(docSnap.data());
+                    const initialCloudData = docSnap.data();
+                    rootState = normalizeRootState(initialCloudData);
+                    lastCloudSnapshot = deepClone(initialCloudData);
+                    lastCloudSnapshotSignature = getCloudStateSignature(initialCloudData);
                     activateLeague(rootState.activeLeagueId);
-                    safeSetLocalStorage(CLOUD_CACHE_KEY, JSON.stringify(getPersistableState()));
+                    safeSetLocalStorage(CLOUD_CACHE_KEY, lastCloudSnapshotSignature || JSON.stringify(getPersistableState()));
                     loadingScreen.style.display = 'none';
                     renderAll();
                     applyAdminMode();
@@ -10352,12 +10595,26 @@
                     return;
                 }
 
+                const rawSignature = getCloudStateSignature(raw);
+
+                // setDoc produce un snapshot local y otro confirmado.
+                // Ninguno necesita reconstruir la UI si coincide con nuestro propio guardado.
+                if (rawSignature && (rawSignature === lastCloudSnapshotSignature || isRecentLocalWriteSignature(rawSignature))) {
+                    lastCloudSnapshot = deepClone(raw);
+                    if (!docSnap.metadata.hasPendingWrites) {
+                        lastCloudSnapshotSignature = rawSignature;
+                    }
+                    safeSetLocalStorage(CLOUD_CACHE_KEY, rawSignature);
+                    return;
+                }
+
                 lastCloudSnapshot = deepClone(raw);
+                lastCloudSnapshotSignature = rawSignature;
                 const incoming = normalizeRootState(raw);
                 const previousLeagueId = appState?.id;
                 rootState = incoming;
                 activateLeague(rootState.activeLeagueId, previousLeagueId !== rootState.activeLeagueId);
-                safeSetLocalStorage(CLOUD_CACHE_KEY, JSON.stringify(getPersistableState()));
+                safeSetLocalStorage(CLOUD_CACHE_KEY, rawSignature || JSON.stringify(getPersistableState()));
                 renderAll();
                 applyAdminUiRestrictions();
             }, (error) => {
@@ -10366,31 +10623,51 @@
             });
         }
 
+        function prepareAppImage(img) {
+            if (!img || img.tagName !== 'IMG') return;
+            if (/^https?:\/\//i.test(img.getAttribute('src') || '')) {
+                img.referrerPolicy = 'no-referrer';
+            }
+            if (!img.hasAttribute('decoding')) {
+                img.decoding = 'async';
+            }
+        }
+
         function applyImageReferrerPolicy(root = document) {
+            if (!root) return;
+            if (root.tagName === 'IMG') prepareAppImage(root);
             const images = root.querySelectorAll ? root.querySelectorAll('img') : [];
-            images.forEach(img => {
-                if (/^https?:\/\//i.test(img.getAttribute('src') || '')) {
-                    img.referrerPolicy = 'no-referrer';
-                }
-            });
+            images.forEach(prepareAppImage);
+        }
+
+        const pendingImageRoots = new Set();
+        let pendingImageFrame = null;
+
+        function flushPendingImageRoots() {
+            pendingImageFrame = null;
+            const roots = [...pendingImageRoots];
+            pendingImageRoots.clear();
+            roots.forEach(applyImageReferrerPolicy);
         }
 
         const externalImageObserver = new MutationObserver((mutations) => {
             mutations.forEach(mutation => {
                 mutation.addedNodes.forEach(node => {
-                    if (node.nodeType !== 1) return;
-                    if (node.tagName === 'IMG' && /^https?:\/\//i.test(node.getAttribute('src') || '')) {
-                        node.referrerPolicy = 'no-referrer';
-                    }
-                    applyImageReferrerPolicy(node);
+                    if (node.nodeType === 1) pendingImageRoots.add(node);
                 });
             });
+
+            if (pendingImageRoots.size && pendingImageFrame === null) {
+                pendingImageFrame = requestAnimationFrame(flushPendingImageRoots);
+            }
         });
 
         window.addEventListener('DOMContentLoaded', () => {
             applyImageReferrerPolicy(document);
             externalImageObserver.observe(document.body, { childList: true, subtree: true });
-            setTimeout(() => { initApplication(); }, 500);
+
+            // DOMContentLoaded ya garantiza que el DOM está listo.
+            initApplication();
         });
 
     </script>
