@@ -2396,6 +2396,7 @@
                                     <option value="1">1 llave · 2 equipos</option>
                                     <option value="2">2 llaves · 4 equipos</option>
                                     <option value="4">4 llaves · 8 equipos</option>
+                                    <option value="prelim12">Preliminar · 4 llaves · 12 equipos</option>
                                     <option value="8">8 llaves · 16 equipos</option>
                                 </select>
                             </div>
@@ -3506,9 +3507,52 @@
             return [1, 2, 4, 8].includes(parsed) ? parsed : fallback;
         }
 
-        function createBracketEdition(name = 'Champions League', bracketData = null, initialTies = 4) {
-            const dataInitialTies = bracketData ? getBracketInitialTies(bracketData) : normalizeEditionInitialTies(initialTies, 4);
-            const data = bracketData || initDefaultBracket(dataInitialTies);
+        const PRELIMINARY_BRACKET_FORMAT = 'prelim12';
+
+        function normalizeBracketFormat(value, fallback = '4') {
+            const raw = String(value ?? '').trim().toLowerCase();
+            if (['prelim12', 'preliminar', 'prelim', 'pre', 'p', '12'].includes(raw)) {
+                return PRELIMINARY_BRACKET_FORMAT;
+            }
+
+            const parsed = parseInt(raw, 10);
+            if ([1, 2, 4, 8].includes(parsed)) return String(parsed);
+
+            const fallbackRaw = String(fallback ?? '4').trim().toLowerCase();
+            if (['prelim12', 'preliminar', 'prelim', 'pre', 'p', '12'].includes(fallbackRaw)) {
+                return PRELIMINARY_BRACKET_FORMAT;
+            }
+
+            const fallbackParsed = parseInt(fallbackRaw, 10);
+            return [1, 2, 4, 8].includes(fallbackParsed) ? String(fallbackParsed) : '4';
+        }
+
+        function getBracketFormatTeamCount(format) {
+            const normalized = normalizeBracketFormat(format);
+            return normalized === PRELIMINARY_BRACKET_FORMAT
+                ? 12
+                : normalizeEditionInitialTies(normalized, 4) * 2;
+        }
+
+        function getBracketFormatLabel(format) {
+            const normalized = normalizeBracketFormat(format);
+            if (normalized === PRELIMINARY_BRACKET_FORMAT) {
+                return 'Preliminar · 4 llaves · 12 equipos';
+            }
+            const ties = normalizeEditionInitialTies(normalized, 4);
+            return `${ties} llave${ties === 1 ? '' : 's'} · ${ties * 2} equipos`;
+        }
+
+        function createBracketEdition(name = 'Champions League', bracketData = null, formatOrInitialTies = 4) {
+            const dataFormat = bracketData
+                ? getBracketFormat(bracketData)
+                : normalizeBracketFormat(formatOrInitialTies, '4');
+            const data = bracketData || initDefaultBracket(dataFormat);
+            const dataInitialTies = dataFormat === PRELIMINARY_BRACKET_FORMAT
+                ? 4
+                : normalizeEditionInitialTies(dataFormat, 4);
+
+            data.format = dataFormat;
             data.initialTies = dataInitialTies;
 
             return {
@@ -3516,6 +3560,7 @@
                 name: name || 'Eliminatoria',
                 createdAt: new Date().toISOString(),
                 background: '',
+                format: dataFormat,
                 initialTies: dataInitialTies,
                 data
             };
@@ -3615,12 +3660,15 @@
 
             league.bracketEditions = league.bracketEditions.map((edition, index) => {
                 const normalizedData = normalizeBracketData(edition.data || initDefaultBracket());
-                const dataInitialTies = getBracketInitialTies(normalizedData);
-                const editionInitialTies = normalizeEditionInitialTies(edition.initialTies, dataInitialTies);
+                const dataFormat = getBracketFormat(normalizedData);
+                const editionFormat = normalizeBracketFormat(edition.format, dataFormat);
+                const editionInitialTies = editionFormat === PRELIMINARY_BRACKET_FORMAT
+                    ? 4
+                    : normalizeEditionInitialTies(edition.initialTies, getBracketInitialTies(normalizedData));
 
-                // En datos antiguos el formato vivía solo dentro de data.
-                // En los nuevos guardamos también una copia en la edición para
-                // que cada eliminatoria conserve explícitamente su propio formato.
+                // Las ediciones antiguas siguen funcionando; las nuevas guardan
+                // además el formato para que una preliminar no afecte a otras copas.
+                normalizedData.format = editionFormat;
                 normalizedData.initialTies = editionInitialTies;
 
                 return {
@@ -3628,6 +3676,7 @@
                     name: edition.name || `Eliminatoria ${index + 1}`,
                     createdAt: edition.createdAt || new Date().toISOString(),
                     background: edition.background || '',
+                    format: editionFormat,
                     initialTies: editionInitialTies,
                     data: normalizedData
                 };
@@ -3748,9 +3797,12 @@
             if (!edition) return;
 
             const bracket = appState.bracket || initDefaultBracket();
-            const initialTies = getBracketInitialTies(bracket);
+            const format = getBracketFormat(bracket);
+            const initialTies = format === PRELIMINARY_BRACKET_FORMAT ? 4 : getBracketInitialTies(bracket);
 
+            edition.format = format;
             edition.initialTies = initialTies;
+            bracket.format = format;
             bracket.initialTies = initialTies;
             edition.data = bracket;
         }
@@ -3788,11 +3840,11 @@
                 if (title) title.textContent = activeEdition?.name || 'Eliminatoria';
                 const sizeSelect = document.getElementById('bracket-size-select');
                 if (sizeSelect) {
-                    const editionSize = normalizeEditionInitialTies(
-                        activeEdition?.initialTies,
-                        getBracketInitialTies(appState.bracket)
+                    const editionFormat = normalizeBracketFormat(
+                        activeEdition?.format,
+                        getBracketFormat(appState.bracket)
                     );
-                    sizeSelect.value = String(editionSize);
+                    sizeSelect.value = editionFormat;
                 }
             }
         }
@@ -4287,27 +4339,31 @@
             if (name === null) return;
             const cleanName = name.trim() || defaultName;
 
-            const currentSize = getBracketInitialTies(appState.bracket);
+            const currentFormat = getBracketFormat(appState.bracket);
+            const defaultFormatAnswer = currentFormat === PRELIMINARY_BRACKET_FORMAT ? 'PRE' : currentFormat;
             const sizeAnswer = prompt(
-                '¿Cuántas llaves iniciales tendrá esta eliminatoria?\n\nOpciones: 8, 4, 2 o 1',
-                String(currentSize)
+                'Formato de la nueva eliminatoria:\n\nPRE = ronda preliminar (12 equipos)\n8 = 8 llaves / 16 equipos\n4 = 4 llaves / 8 equipos\n2 = 2 llaves / 4 equipos\n1 = 1 llave / 2 equipos',
+                defaultFormatAnswer
             );
             if (sizeAnswer === null) return;
 
-            const initialTies = parseInt(sizeAnswer, 10);
-            if (![1, 2, 4, 8].includes(initialTies)) {
-                showToast('Cantidad inválida. Usa 8, 4, 2 o 1 llave.');
+            const rawFormat = String(sizeAnswer).trim().toLowerCase();
+            const isPreliminary = ['pre', 'p', 'prelim', 'preliminar', 'prelim12', '12'].includes(rawFormat);
+            const numericFormat = parseInt(rawFormat, 10);
+            if (!isPreliminary && ![1, 2, 4, 8].includes(numericFormat)) {
+                showToast('Formato inválido. Usa PRE, 8, 4, 2 o 1.');
                 return;
             }
 
-            const edition = createBracketEdition(cleanName, null, initialTies);
+            const requestedFormat = isPreliminary ? PRELIMINARY_BRACKET_FORMAT : String(numericFormat);
+            const edition = createBracketEdition(cleanName, null, requestedFormat);
             appState.bracketEditions.push(edition);
             appState.activeBracketId = edition.id;
             appState.bracket = edition.data;
 
             await saveToFirestore();
             renderAll();
-            showToast(`${cleanName} creada con ${initialTies} llave${initialTies === 1 ? '' : 's'} inicial${initialTies === 1 ? '' : 'es'}`);
+            showToast(`${cleanName} creada · ${getBracketFormatLabel(requestedFormat)}`);
         };
 
         let eliminationSwitchSaveTimer = null;
@@ -4337,14 +4393,19 @@
             const edition = appState.bracketEditions.find(e => e.id === editionId);
             if (!edition) return;
 
-            const savedSize = normalizeEditionInitialTies(
-                edition.initialTies,
-                getBracketInitialTies(edition.data || initDefaultBracket())
+            const savedFormat = normalizeBracketFormat(
+                edition.format,
+                getBracketFormat(edition.data || initDefaultBracket())
             );
+            const savedSize = savedFormat === PRELIMINARY_BRACKET_FORMAT
+                ? 4
+                : normalizeEditionInitialTies(edition.initialTies, getBracketInitialTies(edition.data || initDefaultBracket()));
 
             appState.activeBracketId = edition.id;
-            appState.bracket = normalizeBracketData(edition.data || initDefaultBracket(savedSize));
+            appState.bracket = normalizeBracketData(edition.data || initDefaultBracket(savedFormat));
+            appState.bracket.format = savedFormat;
             appState.bracket.initialTies = savedSize;
+            edition.format = savedFormat;
             edition.initialTies = savedSize;
             edition.data = appState.bracket;
 
@@ -4354,7 +4415,7 @@
             renderStats();
             renderFace2Face();
             applyCurrentEliminationBackground();
-            showToast(`${edition.name} cargada · ${savedSize} llave${savedSize === 1 ? '' : 's'}`);
+            showToast(`${edition.name} cargada · ${getBracketFormatLabel(savedFormat)}`);
 
             // Firebase se actualiza después, sin bloquear la interfaz.
             scheduleEliminationSwitchSave();
@@ -6198,16 +6259,52 @@
             return 1;
         }
 
+        function getBracketFormat(bracket = appState?.bracket) {
+            if (!bracket || typeof bracket !== 'object') return '4';
+            if (normalizeBracketFormat(bracket.format, '') === PRELIMINARY_BRACKET_FORMAT || bracket.pre1) {
+                return PRELIMINARY_BRACKET_FORMAT;
+            }
+            return String(getBracketInitialTies(bracket));
+        }
+
         function normalizeBracketData(bracket) {
             if (!bracket || typeof bracket !== 'object') return initDefaultBracket();
-            bracket.initialTies = getBracketInitialTies(bracket);
+
+            const format = getBracketFormat(bracket);
+            bracket.format = format;
+            bracket.initialTies = format === PRELIMINARY_BRACKET_FORMAT ? 4 : getBracketInitialTies(bracket);
+
             if (bracket.trophyUrl === undefined) bracket.trophyUrl = '';
             if (bracket.tournamentMvp === undefined) bracket.tournamentMvp = null;
+
+            if (format === PRELIMINARY_BRACKET_FORMAT) {
+                const prelimRouting = [
+                    ['pre1', 'qf2', 'away'],
+                    ['pre2', 'qf4', 'away'],
+                    ['pre3', 'qf3', 'away'],
+                    ['pre4', 'qf1', 'away']
+                ];
+
+                prelimRouting.forEach(([id, next, nextPos]) => {
+                    if (!bracket[id]) bracket[id] = createTwoLeggedBracketMatch(id, next, nextPos);
+                    bracket[id].next = next;
+                    bracket[id].nextPos = nextPos;
+                    if (bracket[id].propagatedWinner === undefined) bracket[id].propagatedWinner = null;
+                });
+
+                for (let i = 1; i <= 4; i++) {
+                    const id = `qf${i}`;
+                    if (!bracket[id]) bracket[id] = createTwoLeggedBracketMatch(id, `sf${Math.ceil(i / 2)}`, i % 2 === 1 ? 'home' : 'away');
+                }
+                if (!bracket.sf1) bracket.sf1 = createTwoLeggedBracketMatch('sf1', 'final', 'home');
+                if (!bracket.sf2) bracket.sf2 = createTwoLeggedBracketMatch('sf2', 'final', 'away');
+                if (!bracket.final) bracket.final = createFinalBracketMatch();
+            }
 
             // Si la eliminatoria tiene UNA sola llave, esa llave se juega a ida y vuelta.
             // También migramos una final antigua a partido único sin perder sus datos:
             // el marcador anterior pasa a considerarse la ida.
-            if (bracket.initialTies === 1) {
+            if (format !== PRELIMINARY_BRACKET_FORMAT && bracket.initialTies === 1) {
                 const currentFinal = bracket.final && typeof bracket.final === 'object' ? bracket.final : {};
                 if (currentFinal.hScoreIda === undefined) {
                     const upgradedFinal = createTwoLeggedBracketMatch('final', null, null);
@@ -6234,6 +6331,18 @@
 
         function getBracketRounds(bracket = appState?.bracket) {
             if (!bracket) return [];
+
+            const format = getBracketFormat(bracket);
+            if (format === PRELIMINARY_BRACKET_FORMAT) {
+                return [
+                    { name: 'Preliminar', keys: ['pre1', 'pre2', 'pre3', 'pre4'], twoLegged: true },
+                    { name: 'Cuartos', keys: ['qf1', 'qf2', 'qf3', 'qf4'], twoLegged: true },
+                    { name: 'Semifinal', keys: ['sf1', 'sf2'], twoLegged: true },
+                    { name: 'Final', keys: ['final'], twoLegged: false }
+                ].map(round => ({ ...round, keys: round.keys.filter(key => bracket[key]) }))
+                 .filter(round => round.keys.length > 0);
+            }
+
             const initialTies = getBracketInitialTies(bracket);
             const rounds = [];
             if (initialTies >= 8) rounds.push({ name: 'Octavos', keys: Array.from({length: 8}, (_, i) => `r16_${i + 1}`), twoLegged: true });
@@ -6261,15 +6370,41 @@
             return entries;
         }
 
-        function initDefaultBracket(initialTies = 4) {
-            initialTies = parseInt(initialTies, 10);
-            if (![1, 2, 4, 8].includes(initialTies)) initialTies = 4;
+        function initDefaultBracket(formatOrInitialTies = 4) {
+            const format = normalizeBracketFormat(formatOrInitialTies, '4');
+            const initialTies = format === PRELIMINARY_BRACKET_FORMAT
+                ? 4
+                : normalizeEditionInitialTies(format, 4);
 
             const bracket = {
+                format,
                 initialTies,
                 trophyUrl: '',
                 tournamentMvp: null
             };
+
+            if (format === PRELIMINARY_BRACKET_FORMAT) {
+                const prelimRouting = [
+                    ['pre1', 'qf2', 'away'],
+                    ['pre2', 'qf4', 'away'],
+                    ['pre3', 'qf3', 'away'],
+                    ['pre4', 'qf1', 'away']
+                ];
+
+                prelimRouting.forEach(([id, next, nextPos]) => {
+                    bracket[id] = createTwoLeggedBracketMatch(id, next, nextPos);
+                    bracket[id].propagatedWinner = null;
+                });
+
+                for (let i = 1; i <= 4; i++) {
+                    bracket[`qf${i}`] = createTwoLeggedBracketMatch(`qf${i}`, `sf${Math.ceil(i / 2)}`, i % 2 === 1 ? 'home' : 'away');
+                }
+
+                bracket.sf1 = createTwoLeggedBracketMatch('sf1', 'final', 'home');
+                bracket.sf2 = createTwoLeggedBracketMatch('sf2', 'final', 'away');
+                bracket.final = createFinalBracketMatch();
+                return bracket;
+            }
 
             if (initialTies >= 8) {
                 for (let i = 1; i <= 8; i++) {
@@ -6291,6 +6426,69 @@
             return bracket;
         }
 
+        function getCompletedTwoLeggedWinner(match) {
+            if (!match || !match.home || !match.away) return null;
+
+            const required = [
+                match.hScoreIda,
+                match.aScoreIda,
+                match.hScoreVuelta,
+                match.aScoreVuelta
+            ];
+            if (required.some(value => value === null || value === undefined || value === '')) {
+                return null;
+            }
+
+            const homeTotal = required[0] * 1 + required[2] * 1;
+            const awayTotal = required[1] * 1 + required[3] * 1;
+            if (!Number.isFinite(homeTotal) || !Number.isFinite(awayTotal) || homeTotal === awayTotal) {
+                return null;
+            }
+
+            return homeTotal > awayTotal ? match.home : match.away;
+        }
+
+        function syncPreliminaryWinnerSlots(bracket = appState?.bracket) {
+            if (!bracket || getBracketFormat(bracket) !== PRELIMINARY_BRACKET_FORMAT) return;
+
+            ['pre1', 'pre2', 'pre3', 'pre4'].forEach(key => {
+                const match = bracket[key];
+                if (!match?.next || !match?.nextPos || !bracket[match.next]) return;
+
+                const target = bracket[match.next];
+                const slot = match.nextPos;
+                const previousAutoWinner = match.propagatedWinner || null;
+                const winner = getCompletedTwoLeggedWinner(match);
+                const currentValue = target[slot] || null;
+
+                if (winner) {
+                    // Si el usuario no tocó manualmente el cupo de cuartos,
+                    // actualizamos automáticamente al ganador de la preliminar.
+                    if (!currentValue || currentValue === previousAutoWinner) {
+                        if (currentValue !== winner) {
+                            target[slot] = winner;
+                            const lineupKey = slot === 'home' ? 'lineupHome' : 'lineupAway';
+                            const formationKey = slot === 'home' ? 'formationHome' : 'formationAway';
+                            target[lineupKey] = [];
+                            target[formationKey] = '4-3-3';
+                        }
+                    }
+                    match.propagatedWinner = winner;
+                } else {
+                    // Si el resultado deja de ser válido/queda empatado, solo limpiamos
+                    // el cupo si seguía siendo el valor que nosotros habíamos propagado.
+                    if (previousAutoWinner && currentValue === previousAutoWinner) {
+                        target[slot] = null;
+                        const lineupKey = slot === 'home' ? 'lineupHome' : 'lineupAway';
+                        const formationKey = slot === 'home' ? 'formationHome' : 'formationAway';
+                        target[lineupKey] = [];
+                        target[formationKey] = '4-3-3';
+                    }
+                    match.propagatedWinner = null;
+                }
+            });
+        }
+
         function getSeedOrder(teamCount) {
             if (teamCount <= 2) return [1, 2];
             let order = [1, 2];
@@ -6302,10 +6500,13 @@
         }
 
         window.changeBracketSize = async function(value) {
-            const newInitialTies = parseInt(value, 10);
+            const newFormat = normalizeBracketFormat(value, getBracketFormat(appState.bracket));
+            const newInitialTies = newFormat === PRELIMINARY_BRACKET_FORMAT
+                ? 4
+                : normalizeEditionInitialTies(newFormat, 4);
             const select = document.getElementById('bracket-size-select');
-            const currentInitialTies = getBracketInitialTies(appState.bracket);
-            if (![1, 2, 4, 8].includes(newInitialTies) || newInitialTies === currentInitialTies) return;
+            const currentFormat = getBracketFormat(appState.bracket);
+            if (newFormat === currentFormat) return;
 
             const hasBracketData = getBracketMatchEntries(appState.bracket).some(({match}) => {
                 if (!match) return false;
@@ -6315,9 +6516,9 @@
             });
 
             if (hasBracketData) {
-                const ok = confirm(`Cambiar a ${newInitialTies} llave${newInitialTies === 1 ? '' : 's'} inicial${newInitialTies === 1 ? '' : 'es'} reiniciará el cuadro de esta eliminatoria.\n\nEl fondo y el trofeo se conservarán, pero se borrarán cruces, marcadores, MVP y alineaciones del cuadro actual. ¿Continuar?`);
+                const ok = confirm(`Cambiar a "${getBracketFormatLabel(newFormat)}" reiniciará el cuadro de esta eliminatoria.\n\nEl fondo y el trofeo se conservarán, pero se borrarán cruces, marcadores, MVP y alineaciones del cuadro actual. ¿Continuar?`);
                 if (!ok) {
-                    if (select) select.value = String(currentInitialTies);
+                    if (select) select.value = currentFormat;
                     return;
                 }
             }
@@ -6326,12 +6527,13 @@
             const tournamentMvp = appState.bracket?.tournamentMvp || null;
 
             // IMPORTANTE: solo sustituimos el cuadro de la edición activa.
-            appState.bracket = initDefaultBracket(newInitialTies);
+            appState.bracket = initDefaultBracket(newFormat);
             appState.bracket.trophyUrl = trophyUrl;
             appState.bracket.tournamentMvp = tournamentMvp;
 
             const activeEdition = appState.bracketEditions.find(e => e.id === appState.activeBracketId);
             if (activeEdition) {
+                activeEdition.format = newFormat;
                 activeEdition.initialTies = newInitialTies;
                 activeEdition.data = appState.bracket;
             }
@@ -6342,28 +6544,65 @@
             renderBracket();
             renderStats();
             renderFace2Face();
-            showToast(`Cuadro configurado con ${newInitialTies} llave${newInitialTies === 1 ? '' : 's'} inicial${newInitialTies === 1 ? '' : 'es'}`);
+            showToast(`Cuadro configurado · ${getBracketFormatLabel(newFormat)}`);
         };
 
         window.generateBracketFromStandings = async function() {
-            const initialTies = getBracketInitialTies(appState.bracket);
-            const teamCount = initialTies * 2;
+            const format = getBracketFormat(appState.bracket);
+            const initialTies = format === PRELIMINARY_BRACKET_FORMAT ? 4 : getBracketInitialTies(appState.bracket);
+            const teamCount = getBracketFormatTeamCount(format);
+
             if(confirm(`¿Seguro que quieres generar los cruces con los Top ${teamCount} de la tabla actual? Se sobreescribirán los datos manuales del cuadro.`)) {
                 const standings = calculateStandings();
-                if(standings.length < teamCount) { showToast(`No hay suficientes equipos (se necesitan ${teamCount}).`); return; }
+                if(standings.length < teamCount) {
+                    showToast(`No hay suficientes equipos (se necesitan ${teamCount}).`);
+                    return;
+                }
 
                 const trophyUrl = appState.bracket?.trophyUrl || '';
-                appState.bracket = initDefaultBracket(initialTies);
+                const tournamentMvp = appState.bracket?.tournamentMvp || null;
+                appState.bracket = initDefaultBracket(format);
                 appState.bracket.trophyUrl = trophyUrl;
+                appState.bracket.tournamentMvp = tournamentMvp;
 
-                const firstRound = getBracketRounds(appState.bracket)[0];
-                const seedOrder = getSeedOrder(teamCount);
-                firstRound.keys.forEach((key, i) => {
-                    const homeSeed = seedOrder[i * 2];
-                    const awaySeed = seedOrder[i * 2 + 1];
-                    appState.bracket[key].home = standings[homeSeed - 1]?.id || null;
-                    appState.bracket[key].away = standings[awaySeed - 1]?.id || null;
-                });
+                if (format === PRELIMINARY_BRACKET_FORMAT) {
+                    // Modelo solicitado:
+                    // Preliminar: 5º-12º, 6º-11º, 7º-10º, 8º-9º.
+                    // Cuartos: 1º vs ganador 8º/9º; 4º vs ganador 5º/12º;
+                    //          2º vs ganador 7º/10º; 3º vs ganador 6º/11º.
+                    const prelimSeeds = [
+                        [5, 12],
+                        [6, 11],
+                        [7, 10],
+                        [8, 9]
+                    ];
+
+                    prelimSeeds.forEach(([homeSeed, awaySeed], index) => {
+                        const match = appState.bracket[`pre${index + 1}`];
+                        match.home = standings[homeSeed - 1]?.id || null;
+                        match.away = standings[awaySeed - 1]?.id || null;
+                    });
+
+                    const directQuarterSeeds = [
+                        ['qf1', 1],
+                        ['qf2', 4],
+                        ['qf3', 2],
+                        ['qf4', 3]
+                    ];
+                    directQuarterSeeds.forEach(([key, seed]) => {
+                        appState.bracket[key].home = standings[seed - 1]?.id || null;
+                        appState.bracket[key].away = null;
+                    });
+                } else {
+                    const firstRound = getBracketRounds(appState.bracket)[0];
+                    const seedOrder = getSeedOrder(teamCount);
+                    firstRound.keys.forEach((key, i) => {
+                        const homeSeed = seedOrder[i * 2];
+                        const awaySeed = seedOrder[i * 2 + 1];
+                        appState.bracket[key].home = standings[homeSeed - 1]?.id || null;
+                        appState.bracket[key].away = standings[awaySeed - 1]?.id || null;
+                    });
+                }
 
                 syncActiveBracketEdition();
                 renderBracket();
@@ -6468,32 +6707,45 @@
 
         function renderBracket() {
             const activeEdition = appState?.bracketEditions?.find(e => e.id === appState.activeBracketId);
-            const savedInitialTies = normalizeEditionInitialTies(
-                activeEdition?.initialTies,
-                getBracketInitialTies(activeEdition?.data || appState.bracket || initDefaultBracket())
+            const savedFormat = normalizeBracketFormat(
+                activeEdition?.format,
+                getBracketFormat(activeEdition?.data || appState.bracket || initDefaultBracket())
             );
+            const savedInitialTies = savedFormat === PRELIMINARY_BRACKET_FORMAT
+                ? 4
+                : normalizeEditionInitialTies(
+                    activeEdition?.initialTies,
+                    getBracketInitialTies(activeEdition?.data || appState.bracket || initDefaultBracket())
+                );
 
-            if (!appState.bracket) appState.bracket = initDefaultBracket(savedInitialTies);
+            if (!appState.bracket) appState.bracket = initDefaultBracket(savedFormat);
             appState.bracket = normalizeBracketData(appState.bracket);
+            appState.bracket.format = savedFormat;
             appState.bracket.initialTies = savedInitialTies;
 
             if (activeEdition) {
+                activeEdition.format = savedFormat;
                 activeEdition.initialTies = savedInitialTies;
                 activeEdition.data = appState.bracket;
             }
 
             const b = appState.bracket;
             const initialTies = savedInitialTies;
+            syncPreliminaryWinnerSlots(b);
 
             const sizeSelect = document.getElementById('bracket-size-select');
-            if (sizeSelect) sizeSelect.value = String(initialTies);
+            if (sizeSelect) sizeSelect.value = savedFormat;
             const generateBtn = document.getElementById('btn-generate-bracket');
-            if (generateBtn) generateBtn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Armar Top ${initialTies * 2}`;
+            if (generateBtn) generateBtn.innerHTML = `<i class="fa-solid fa-wand-magic-sparkles"></i> Armar Top ${getBracketFormatTeamCount(savedFormat)}`;
             const formatHelp = document.getElementById('elimination-format-help');
             if (formatHelp) {
-                formatHelp.textContent = initialTies === 1
-                    ? 'Única llave a ida y vuelta. El global se calcula automáticamente con ambos partidos.'
-                    : 'Las rondas previas se juegan a ida y vuelta. Final a partido único. El global se calcula automáticamente.';
+                if (savedFormat === PRELIMINARY_BRACKET_FORMAT) {
+                    formatHelp.textContent = 'Preliminar editable: 4 llaves a ida y vuelta. Por defecto: 5.º-12.º, 6.º-11.º, 7.º-10.º y 8.º-9.º; los cuatro primeros pasan directo a cuartos. Puedes cambiar manualmente cualquier equipo.';
+                } else {
+                    formatHelp.textContent = initialTies === 1
+                        ? 'Única llave a ida y vuelta. El global se calcula automáticamente con ambos partidos.'
+                        : 'Las rondas previas se juegan a ida y vuelta. Final a partido único. El global se calcula automáticamente.';
+                }
             }
 
             const trophyImg = b.trophyUrl
@@ -6592,6 +6844,11 @@
                     }
                 }
             });
+
+            // En formato preliminar, cuando las dos piernas están completas
+            // el ganador ocupa automáticamente su cupo de cuartos.
+            // Si el admin cambió ese cupo manualmente, no se sobrescribe.
+            syncPreliminaryWinnerSlots(appState.bracket);
 
             const activeElement = document.activeElement;
             const activeDataId = activeElement?.dataset?.bracketId;
