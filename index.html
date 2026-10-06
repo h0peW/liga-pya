@@ -4331,7 +4331,9 @@
         };
 
         window.createNewElimination = async function() {
-            if (window.autoSaveBracket) await window.autoSaveBracket();
+            if (window.autoSaveBracket) {
+                await window.autoSaveBracket({ persist: false, rerender: false });
+            }
             syncActiveBracketEdition();
 
             const defaultName = `Eliminatoria ${appState.bracketEditions.length + 1}`;
@@ -4361,9 +4363,11 @@
             appState.activeBracketId = edition.id;
             appState.bracket = edition.data;
 
-            await saveToFirestore();
-            renderAll();
+            renderCompetitionSelectors();
+            renderBracket();
+            applyCurrentEliminationBackground();
             showToast(`${cleanName} creada · ${getBracketFormatLabel(requestedFormat)}`);
+            scheduleEliminationSwitchSave();
         };
 
         let eliminationSwitchSaveTimer = null;
@@ -4412,8 +4416,6 @@
             // Primero pintamos la nueva eliminatoria: el cambio visual es inmediato.
             renderCompetitionSelectors();
             renderBracket();
-            renderStats();
-            renderFace2Face();
             applyCurrentEliminationBackground();
             showToast(`${edition.name} cargada · ${getBracketFormatLabel(savedFormat)}`);
 
@@ -6539,12 +6541,10 @@
             }
 
             syncActiveBracketEdition();
-            await saveToFirestore();
             renderCompetitionSelectors();
             renderBracket();
-            renderStats();
-            renderFace2Face();
             showToast(`Cuadro configurado · ${getBracketFormatLabel(newFormat)}`);
+            scheduleEliminationSwitchSave();
         };
 
         window.generateBracketFromStandings = async function() {
@@ -6606,18 +6606,35 @@
 
                 syncActiveBracketEdition();
                 renderBracket();
-                await saveToFirestore();
-                showToast(`Top ${teamCount} armado y guardado`);
+                showToast(`Top ${teamCount} armado`);
+                scheduleEliminationSwitchSave();
             }
         };
 
+        let bracketTeamOptionsCache = new Map();
+        let bracketMvpOptionsCache = new Map();
+
+        function resetBracketOptionCaches() {
+            bracketTeamOptionsCache = new Map();
+            bracketMvpOptionsCache = new Map();
+        }
+
         function getTeamOptions(selectedId) {
+            const cacheKey = selectedId || '__empty__';
+            if (bracketTeamOptionsCache.has(cacheKey)) return bracketTeamOptionsCache.get(cacheKey);
+
             let options = `<option value="">-- Equipo --</option>`;
-            appState.teams.forEach(t => { options += `<option value="${t.id}" ${t.id === selectedId ? 'selected' : ''}>${t.name}</option>`; });
+            appState.teams.forEach(t => {
+                options += `<option value="${t.id}" ${t.id === selectedId ? 'selected' : ''}>${t.name}</option>`;
+            });
+            bracketTeamOptionsCache.set(cacheKey, options);
             return options;
         }
 
         function getBracketMvpOptions(homeId, awayId, selectedMvpId, defaultText) {
+            const cacheKey = `${homeId || ''}|${awayId || ''}|${selectedMvpId || ''}|${defaultText}`;
+            if (bracketMvpOptionsCache.has(cacheKey)) return bracketMvpOptionsCache.get(cacheKey);
+
             let options = `<option value="">- ${defaultText} -</option>`;
             const addTeamPlayers = (teamId) => {
                 const team = appState.teams.find(t => t.id === teamId);
@@ -6631,6 +6648,8 @@
             };
             if(homeId) addTeamPlayers(homeId);
             if(awayId) addTeamPlayers(awayId);
+
+            bracketMvpOptionsCache.set(cacheKey, options);
             return options;
         }
 
@@ -6648,6 +6667,112 @@
             return options;
         }
 
+        let bracketSaveTimer = null;
+
+        function scheduleBracketSave(delay = 320) {
+            if (bracketSaveTimer) clearTimeout(bracketSaveTimer);
+            bracketSaveTimer = setTimeout(() => {
+                bracketSaveTimer = null;
+                syncActiveBracketEdition();
+                saveToFirestore();
+            }, delay);
+        }
+
+        function getBracketEntryById(matchId) {
+            return getBracketMatchEntries(appState?.bracket).find(entry => entry.key === matchId) || null;
+        }
+
+        function refreshBracketMatchCard(matchId) {
+            if (!matchId || !appState?.bracket?.[matchId]) return;
+            const card = document.querySelector(`[data-bracket-card="${matchId}"]`);
+            if (!card) return;
+
+            const entry = getBracketEntryById(matchId);
+            if (!entry) return;
+
+            resetBracketOptionCaches();
+
+            const isFinal = entry.roundName === 'Final';
+            const title = isFinal ? 'FINAL' : entry.title;
+            const matchHtml = createBracketMatch(appState.bracket[matchId], title, entry.isTwoLegged);
+
+            if (isFinal) {
+                renderBracket();
+                return;
+            }
+
+            card.innerHTML = matchHtml;
+            applyImageReferrerPolicy(card);
+        }
+
+        function updateSingleBracketAggregate(match) {
+            if (!match || match.hScoreIda === undefined) return;
+
+            const values = [
+                match.hScoreIda, match.aScoreIda,
+                match.hScoreVuelta, match.aScoreVuelta
+            ];
+            const hasAnyScore = values.some(v => v !== null && v !== undefined && v !== '');
+
+            if (!hasAnyScore) {
+                match.hScore = null;
+                match.aScore = null;
+                return;
+            }
+
+            const hI = match.hScoreIda !== null && match.hScoreIda !== '' ? parseInt(match.hScoreIda, 10) || 0 : 0;
+            const hV = match.hScoreVuelta !== null && match.hScoreVuelta !== '' ? parseInt(match.hScoreVuelta, 10) || 0 : 0;
+            const aI = match.aScoreIda !== null && match.aScoreIda !== '' ? parseInt(match.aScoreIda, 10) || 0 : 0;
+            const aV = match.aScoreVuelta !== null && match.aScoreVuelta !== '' ? parseInt(match.aScoreVuelta, 10) || 0 : 0;
+
+            match.hScore = String(hI + hV);
+            match.aScore = String(aI + aV);
+        }
+
+        window.onBracketFieldChange = function(input) {
+            if (!input || !appState?.bracket) return;
+
+            const matchId = input.dataset.bracketId;
+            const type = input.dataset.type;
+            if (!matchId || !type) return;
+
+            if (matchId === 'root' && type === 'tournamentMvp') {
+                appState.bracket.tournamentMvp = input.value === '' ? null : input.value;
+                scheduleBracketSave();
+                return;
+            }
+
+            const match = appState.bracket[matchId];
+            if (!match) return;
+            const value = input.value === '' ? null : input.value;
+
+            if (type === 'home-id' || type === 'away-id') {
+                const teamKey = type === 'home-id' ? 'home' : 'away';
+                const lineupKey = type === 'home-id' ? 'lineupHome' : 'lineupAway';
+                const formationKey = type === 'home-id' ? 'formationHome' : 'formationAway';
+
+                if (match[teamKey] !== value) {
+                    match[teamKey] = value;
+                    match[lineupKey] = [];
+                    match[formationKey] = '4-3-3';
+                }
+            } else {
+                match[type] = value;
+            }
+
+            updateSingleBracketAggregate(match);
+
+            const nextMatchId = match.next || null;
+            syncPreliminaryWinnerSlots(appState.bracket);
+
+            refreshBracketMatchCard(matchId);
+            if (nextMatchId && appState.bracket[nextMatchId]) {
+                refreshBracketMatchCard(nextMatchId);
+            }
+
+            scheduleBracketSave();
+        };
+
         function createBracketMatch(matchData, title, isTwoLegged = false) {
             const homeTeam = appState.teams.find(t => t.id === matchData.home);
             const awayTeam = appState.teams.find(t => t.id === matchData.away);
@@ -6655,21 +6780,21 @@
             const aG = matchData.aScore !== null ? parseInt(matchData.aScore) : -1;
             let homeWinnerClass = hG > aG && hG !== -1 ? 'winner' : '';
             let awayWinnerClass = aG > hG && aG !== -1 ? 'winner' : '';
-            const homeSelect = `<select class="text-xs max-w-[100px] bg-transparent outline-none truncate" data-bracket-id="${matchData.id}" data-type="home-id" onchange="autoSaveBracket()">${getTeamOptions(matchData.home)}</select>`;
-            const awaySelect = `<select class="text-xs max-w-[100px] bg-transparent outline-none truncate" data-bracket-id="${matchData.id}" data-type="away-id" onchange="autoSaveBracket()">${getTeamOptions(matchData.away)}</select>`;
+            const homeSelect = `<select class="text-xs max-w-[100px] bg-transparent outline-none truncate" data-bracket-id="${matchData.id}" data-type="home-id" onchange="onBracketFieldChange(this)">${getTeamOptions(matchData.home)}</select>`;
+            const awaySelect = `<select class="text-xs max-w-[100px] bg-transparent outline-none truncate" data-bracket-id="${matchData.id}" data-type="away-id" onchange="onBracketFieldChange(this)">${getTeamOptions(matchData.away)}</select>`;
 
             let mvpSection = '';
             if (isTwoLegged) {
                 mvpSection = `
                     <div class="bg-amber-50/50 p-1.5 border-t border-amber-100 flex gap-2 rounded-b-lg">
-                        <select class="bracket-input flex-1 text-[10px] font-medium border border-amber-300 bg-white text-amber-900 rounded outline-none truncate" data-bracket-id="${matchData.id}" data-type="mvpIda" onchange="autoSaveBracket()">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvpIda, 'MVP Ida')}</select>
-                        <select class="bracket-input flex-1 text-[10px] font-medium border border-amber-300 bg-white text-amber-900 rounded outline-none truncate" data-bracket-id="${matchData.id}" data-type="mvpVuelta" onchange="autoSaveBracket()">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvpVuelta, 'MVP Vta')}</select>
+                        <select class="bracket-input flex-1 text-[10px] font-medium border border-amber-300 bg-white text-amber-900 rounded outline-none truncate" data-bracket-id="${matchData.id}" data-type="mvpIda" onchange="onBracketFieldChange(this)">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvpIda, 'MVP Ida')}</select>
+                        <select class="bracket-input flex-1 text-[10px] font-medium border border-amber-300 bg-white text-amber-900 rounded outline-none truncate" data-bracket-id="${matchData.id}" data-type="mvpVuelta" onchange="onBracketFieldChange(this)">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvpVuelta, 'MVP Vta')}</select>
                     </div>
                 `;
             } else {
                 mvpSection = `
                     <div class="bg-amber-50/50 p-1.5 border-t border-amber-100 flex rounded-b-lg">
-                        <select class="bracket-input w-full text-[11px] font-medium border border-amber-300 bg-white text-amber-900 rounded p-1 outline-none truncate text-center" data-bracket-id="${matchData.id}" data-type="mvp" onchange="autoSaveBracket()">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvp, 'Elegir MVP de la Final')}</select>
+                        <select class="bracket-input w-full text-[11px] font-medium border border-amber-300 bg-white text-amber-900 rounded p-1 outline-none truncate text-center" data-bracket-id="${matchData.id}" data-type="mvp" onchange="onBracketFieldChange(this)">${getBracketMvpOptions(matchData.home, matchData.away, matchData.mvp, 'Elegir MVP de la Final')}</select>
                     </div>
                 `;
             }
@@ -6685,10 +6810,10 @@
                     </div>
                     <div class="bracket-match flex flex-col !border-b-0">
                         <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}
-                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreIda" value="${matchData.hScoreIda !== null ? matchData.hScoreIda : ''}" onchange="autoSaveBracket()"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreVuelta" value="${matchData.hScoreVuelta !== null ? matchData.hScoreVuelta : ''}" onchange="autoSaveBracket()"><span class="bracket-score-total">${matchData.hScore !== null ? matchData.hScore : '-'}</span></div>
+                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreIda" value="${matchData.hScoreIda !== null ? matchData.hScoreIda : ''}" onchange="onBracketFieldChange(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreVuelta" value="${matchData.hScoreVuelta !== null ? matchData.hScoreVuelta : ''}" onchange="onBracketFieldChange(this)"><span class="bracket-score-total">${matchData.hScore !== null ? matchData.hScore : '-'}</span></div>
                         </div>
                         <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}
-                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreIda" value="${matchData.aScoreIda !== null ? matchData.aScoreIda : ''}" onchange="autoSaveBracket()"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreVuelta" value="${matchData.aScoreVuelta !== null ? matchData.aScoreVuelta : ''}" onchange="autoSaveBracket()"><span class="bracket-score-total">${matchData.aScore !== null ? matchData.aScore : '-'}</span></div>
+                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreIda" value="${matchData.aScoreIda !== null ? matchData.aScoreIda : ''}" onchange="onBracketFieldChange(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreVuelta" value="${matchData.aScoreVuelta !== null ? matchData.aScoreVuelta : ''}" onchange="onBracketFieldChange(this)"><span class="bracket-score-total">${matchData.aScore !== null ? matchData.aScore : '-'}</span></div>
                         </div>
                         ${mvpSection}
                     </div>
@@ -6697,8 +6822,8 @@
                 return `
                     <div class="flex items-center gap-1 mb-1 ml-1"><div class="text-xs font-bold text-slate-400">${title}</div><button onclick="openLineup('${matchData.id}', true)" class="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded hover:bg-slate-300 transition-colors shadow-sm" title="11 Inicial"><i class="fa-solid fa-chess-board"></i></button></div>
                     <div class="bracket-match flex flex-col !border-b-0">
-                        <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="hScore" value="${matchData.hScore !== null ? matchData.hScore : ''}" onchange="autoSaveBracket()"></div>
-                        <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="aScore" value="${matchData.aScore !== null ? matchData.aScore : ''}" onchange="autoSaveBracket()"></div>
+                        <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="hScore" value="${matchData.hScore !== null ? matchData.hScore : ''}" onchange="onBracketFieldChange(this)"></div>
+                        <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="aScore" value="${matchData.aScore !== null ? matchData.aScore : ''}" onchange="onBracketFieldChange(this)"></div>
                         ${mvpSection}
                     </div>
                 `;
@@ -6732,6 +6857,7 @@
             const b = appState.bracket;
             const initialTies = savedInitialTies;
             syncPreliminaryWinnerSlots(b);
+            resetBracketOptionCaches();
 
             const sizeSelect = document.getElementById('bracket-size-select');
             if (sizeSelect) sizeSelect.value = savedFormat;
@@ -6758,7 +6884,7 @@
                     <div class="text-amber-800 font-bold text-[11px] mb-1.5 flex items-center justify-center gap-1">
                         <i class="fa-solid fa-star"></i> MVP DEL TORNEO
                     </div>
-                    <select class="bracket-input w-full text-xs font-semibold border border-amber-400 bg-white text-amber-900 rounded p-1.5 outline-none truncate text-center" data-bracket-id="root" data-type="tournamentMvp" onchange="autoSaveBracket()">
+                    <select class="bracket-input w-full text-xs font-semibold border border-amber-400 bg-white text-amber-900 rounded p-1.5 outline-none truncate text-center" data-bracket-id="root" data-type="tournamentMvp" onchange="onBracketFieldChange(this)">
                         ${tournamentMvpOpts}
                     </select>
                 </div>
@@ -6770,8 +6896,8 @@
                 const matchesHtml = round.keys.map((key, index) => {
                     const title = isFinal ? 'FINAL' : `${round.name} ${index + 1}`;
                     const matchHtml = createBracketMatch(b[key], title, round.twoLegged);
-                    if (isFinal) return `<div><div class="text-center mb-2">${trophyImg}</div>${matchHtml}${tournamentMvpBlock}</div>`;
-                    return `<div>${matchHtml}</div>`;
+                    if (isFinal) return `<div data-bracket-card="${key}"><div class="text-center mb-2">${trophyImg}</div>${matchHtml}${tournamentMvpBlock}</div>`;
+                    return `<div data-bracket-card="${key}">${matchHtml}</div>`;
                 }).join('');
                 const gapClass = round.keys.length <= 2 ? 'gap-12' : 'gap-4';
                 return `<div class="bracket-column ${isFinal ? 'justify-center' : ''} ${gapClass}">${matchesHtml}</div>`;
@@ -6793,7 +6919,7 @@
 
             const {
                 persist = true,
-                rerender = true
+                rerender = false
             } = options;
 
             const inputs = document.querySelectorAll('#bracket-container select, #bracket-container input');
@@ -6869,9 +6995,9 @@
         };
 
 
-        window.saveBracket = async function() { 
-            await window.autoSaveBracket(); 
-            showToast("Llaves eliminatorias guardadas"); 
+        window.saveBracket = async function() {
+            await window.autoSaveBracket({ persist: true, rerender: false });
+            showToast("Llaves eliminatorias guardadas");
         };
 
 
@@ -10646,7 +10772,14 @@
             });
             adminGuardsInstalled = true;
 
-            const observer = new MutationObserver(() => applyAdminUiRestrictions());
+            let adminUiRestrictionFrame = null;
+            const observer = new MutationObserver(() => {
+                if (adminUiRestrictionFrame !== null) return;
+                adminUiRestrictionFrame = requestAnimationFrame(() => {
+                    adminUiRestrictionFrame = null;
+                    applyAdminUiRestrictions();
+                });
+            });
             observer.observe(document.body, { childList: true, subtree: true });
         }
 
