@@ -4034,10 +4034,28 @@
             showToast(`${cleanName} creada con ${initialTies} llave${initialTies === 1 ? '' : 's'} inicial${initialTies === 1 ? '' : 'es'}`);
         };
 
+        let eliminationSwitchSaveTimer = null;
+
+        function scheduleEliminationSwitchSave() {
+            if (eliminationSwitchSaveTimer) {
+                clearTimeout(eliminationSwitchSaveTimer);
+            }
+
+            // Agrupa cambios rápidos y sincroniza solo el estado más reciente.
+            eliminationSwitchSaveTimer = setTimeout(() => {
+                eliminationSwitchSaveTimer = null;
+                saveToFirestore();
+            }, 180);
+        }
+
         window.switchEliminationEdition = async function(editionId) {
             if (!editionId || editionId === appState.activeBracketId) return;
 
-            if (window.autoSaveBracket) await window.autoSaveBracket();
+            // Captura los datos escritos en la eliminatoria actual, pero sin
+            // re-renderizarla ni esperar una escritura en Firebase.
+            if (window.autoSaveBracket) {
+                await window.autoSaveBracket({ persist: false, rerender: false });
+            }
             syncActiveBracketEdition();
 
             const edition = appState.bracketEditions.find(e => e.id === editionId);
@@ -4054,13 +4072,16 @@
             edition.initialTies = savedSize;
             edition.data = appState.bracket;
 
-            await saveToFirestore();
+            // Primero pintamos la nueva eliminatoria: el cambio visual es inmediato.
             renderCompetitionSelectors();
             renderBracket();
             renderStats();
             renderFace2Face();
             applyCurrentEliminationBackground();
             showToast(`${edition.name} cargada · ${savedSize} llave${savedSize === 1 ? '' : 's'}`);
+
+            // Firebase se actualiza después, sin bloquear la interfaz.
+            scheduleEliminationSwitchSave();
         };
 
         window.deleteElimination = async function(editionId) {
@@ -5723,11 +5744,16 @@
             }
         };
 
-        window.autoSaveBracket = async function() {
-            if(!appState.bracket) return; 
-            
+        window.autoSaveBracket = async function(options = {}) {
+            if(!appState.bracket) return;
+
+            const {
+                persist = true,
+                rerender = true
+            } = options;
+
             const inputs = document.querySelectorAll('#bracket-container select, #bracket-container input');
-            
+
             inputs.forEach(input => {
                 const id = input.dataset.bracketId;
                 const type = input.dataset.type;
@@ -5747,7 +5773,7 @@
                     const teamKey = type === 'home-id' ? 'home' : 'away';
                     const lineupKey = type === 'home-id' ? 'lineupHome' : 'lineupAway';
                     const cleanVal = val === "" ? null : val;
-                    
+
                     if (appState.bracket[id][teamKey] !== cleanVal) {
                         appState.bracket[id][teamKey] = cleanVal;
                         appState.bracket[id][lineupKey] = [];
@@ -5757,33 +5783,42 @@
             });
 
             Object.values(appState.bracket).forEach(match => {
-                // El bracket también contiene propiedades auxiliares (p. ej. trophyUrl y tournamentMvp).
-                // Solo procesamos objetos que realmente representan partidos.
                 if (!match || typeof match !== 'object') return;
-                if (match.hScoreIda !== undefined) { 
+
+                if (match.hScoreIda !== undefined) {
                     const hI = match.hScoreIda !== null ? parseInt(match.hScoreIda) : 0;
                     const hV = match.hScoreVuelta !== null ? parseInt(match.hScoreVuelta) : 0;
                     const aI = match.aScoreIda !== null ? parseInt(match.aScoreIda) : 0;
                     const aV = match.aScoreVuelta !== null ? parseInt(match.aScoreVuelta) : 0;
+
                     if(match.hScoreIda !== null || match.hScoreVuelta !== null || match.aScoreIda !== null || match.aScoreVuelta !== null) {
-                        match.hScore = (hI + hV).toString(); match.aScore = (aI + aV).toString();
-                    } else { match.hScore = null; match.aScore = null; }
+                        match.hScore = (hI + hV).toString();
+                        match.aScore = (aI + aV).toString();
+                    } else {
+                        match.hScore = null;
+                        match.aScore = null;
+                    }
                 }
             });
-            
+
             const activeElement = document.activeElement;
             const activeDataId = activeElement?.dataset?.bracketId;
             const activeDataType = activeElement?.dataset?.type;
-            
-            renderBracket();
-            
-            if(activeDataId && activeDataType) {
-                const el = document.querySelector(`[data-bracket-id="${activeDataId}"][data-type="${activeDataType}"]`);
-                if(el) el.focus();
+
+            if (rerender) {
+                renderBracket();
+
+                if(activeDataId && activeDataType) {
+                    const el = document.querySelector(`[data-bracket-id="${activeDataId}"][data-type="${activeDataType}"]`);
+                    if(el) el.focus();
+                }
             }
 
-            await saveToFirestore();
+            if (persist) {
+                await saveToFirestore();
+            }
         };
+
 
         window.saveBracket = async function() { 
             await window.autoSaveBracket(); 
