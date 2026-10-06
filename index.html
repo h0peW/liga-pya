@@ -2008,6 +2008,23 @@
             color: #e2e8f0 !important;
         }
 
+    
+        html.dark #qualification-relegation-input {
+            background: #0f172a !important;
+            color: #f8fafc !important;
+            border-color: #7f1d1d !important;
+        }
+        html.dark #relegation-slot-display {
+            background: rgba(127, 29, 29, .20) !important;
+            border-color: #ef4444 !important;
+            color: #fca5a5 !important;
+        }
+        html.dark #promotion-slot-display {
+            background: rgba(20, 83, 45, .20) !important;
+            border-color: #22c55e !important;
+            color: #86efac !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2159,11 +2176,13 @@
                         <div id="relegation-legend" class="flex items-center gap-1.5">
                             <div class="w-3 h-3 bg-red-500 rounded-sm"></div>
                             <span class="font-semibold">Descenso</span>
+                            <span id="relegation-slot-display" class="text-[11px] font-bold text-red-700 bg-red-50 border border-red-200 rounded-full px-2 py-0.5">1 equipo</span>
                         </div>
 
                         <div id="promotion-legend" class="hidden flex items-center gap-1.5">
                             <div class="w-3 h-3 bg-green-500 rounded-sm"></div>
                             <span class="font-semibold">Ascenso</span>
+                            <span id="promotion-slot-display" class="text-[11px] font-bold text-green-700 bg-green-50 border border-green-200 rounded-full px-2 py-0.5">1 equipo</span>
                         </div>
 
                         <div id="qualification-admin-controls" data-admin-only class="ml-auto flex flex-wrap items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 shadow-sm">
@@ -2180,6 +2199,12 @@
                                 Europa
                                 <input id="qualification-europa-input" type="number" min="0" step="1"
                                     class="w-16 border border-orange-200 rounded-md px-2 py-1 text-center text-slate-800 bg-white outline-none focus:ring-2 focus:ring-orange-200"
+                                    onchange="updateQualificationSlots()">
+                            </label>
+                            <label class="flex items-center gap-1.5 text-xs font-bold text-red-700">
+                                Descenso
+                                <input id="qualification-relegation-input" type="number" min="0" step="1"
+                                    class="w-16 border border-red-200 rounded-md px-2 py-1 text-center text-slate-800 bg-white outline-none focus:ring-2 focus:ring-red-200"
                                     onchange="updateQualificationSlots()">
                             </label>
                         </div>
@@ -3106,7 +3131,7 @@
             const teamIds = (teams || []).map(team => team.id).filter(Boolean);
             const qualification = options.qualificationSlots && typeof options.qualificationSlots === 'object'
                 ? options.qualificationSlots
-                : { champions: id === 'liga1' ? 4 : 0, europa: id === 'liga1' ? 2 : 0 };
+                : { champions: id === 'liga1' ? 4 : 0, europa: id === 'liga1' ? 2 : 0, relegation: id === 'liga1' ? 1 : 0 };
 
             return {
                 id,
@@ -3117,7 +3142,10 @@
                 matchdayMvps: options.matchdayMvps && typeof options.matchdayMvps === 'object' ? options.matchdayMvps : {},
                 qualificationSlots: {
                     champions: Math.max(0, parseInt(qualification.champions, 10) || 0),
-                    europa: Math.max(0, parseInt(qualification.europa, 10) || 0)
+                    europa: Math.max(0, parseInt(qualification.europa, 10) || 0),
+                    relegation: id === 'liga1'
+                        ? Math.max(0, parseInt(qualification.relegation, 10) || 1)
+                        : 0
                 }
             };
         }
@@ -3128,7 +3156,7 @@
             const teamIds = [...new Set(rawIds.filter(id => teamIdSet.has(id)))];
             const qualification = comp?.qualificationSlots && typeof comp.qualificationSlots === 'object'
                 ? comp.qualificationSlots
-                : { champions: fallbackId === 'liga1' ? 4 : 0, europa: fallbackId === 'liga1' ? 2 : 0 };
+                : { champions: fallbackId === 'liga1' ? 4 : 0, europa: fallbackId === 'liga1' ? 2 : 0, relegation: fallbackId === 'liga1' ? 1 : 0 };
 
             return {
                 id: comp?.id || fallbackId,
@@ -3140,10 +3168,11 @@
                 matches: Array.isArray(comp?.matches) ? comp.matches : [],
                 matchdayMvps: comp?.matchdayMvps && typeof comp.matchdayMvps === 'object' ? comp.matchdayMvps : {},
                 qualificationSlots: fallbackId === 'liga2'
-                    ? { champions: 0, europa: 0 }
+                    ? { champions: 0, europa: 0, relegation: 0 }
                     : {
                         champions: Math.max(0, parseInt(qualification.champions, 10) || 0),
-                        europa: Math.max(0, parseInt(qualification.europa, 10) || 0)
+                        europa: Math.max(0, parseInt(qualification.europa, 10) || 0),
+                        relegation: Math.max(0, parseInt(qualification.relegation, 10) || 1)
                     }
             };
         }
@@ -3211,7 +3240,7 @@
                 const liga2 = createDomesticCompetition('liga2', 'Liga 2', [], {
                     matches: [],
                     matchdayMvps: {},
-                    qualificationSlots: { champions: 0, europa: 0 }
+                    qualificationSlots: { champions: 0, europa: 0, relegation: 0 }
                 });
                 league.domesticLeagues = [liga1, liga2];
                 league.activeDomesticLeagueId = 'liga1';
@@ -3246,10 +3275,14 @@
             const firstEdition = createBracketEdition('Champions League');
 
             const liga1 = createDomesticCompetition('liga1', 'Liga 1', copiedTeams, {
-                qualificationSlots: { champions: Math.min(4, copiedTeams.length), europa: Math.min(2, Math.max(0, copiedTeams.length - Math.min(4, copiedTeams.length))) }
+                qualificationSlots: {
+                    champions: Math.min(4, copiedTeams.length),
+                    europa: Math.min(2, Math.max(0, copiedTeams.length - Math.min(4, copiedTeams.length))),
+                    relegation: copiedTeams.length > 0 ? 1 : 0
+                }
             });
             const liga2 = createDomesticCompetition('liga2', 'Liga 2', [], {
-                qualificationSlots: { champions: 0, europa: 0 }
+                qualificationSlots: { champions: 0, europa: 0, relegation: 0 }
             });
 
             return {
@@ -3305,7 +3338,8 @@
             };
             const legacyQualificationSlots = {
                 champions: normalizeQualificationSlot(qualificationSource.champions, 4),
-                europa: normalizeQualificationSlot(qualificationSource.europa, 2)
+                europa: normalizeQualificationSlot(qualificationSource.europa, 2),
+                relegation: normalizeQualificationSlot(qualificationSource.relegation, 1)
             };
 
             normalizeDomesticLeagues(league, legacyMatches, legacyMatchdayMvps, legacyQualificationSlots);
@@ -3792,12 +3826,16 @@
                 const maxTeams = ids.length;
 
                 if (competition.id === 'liga2') {
-                    competition.qualificationSlots = { champions: 0, europa: 0 };
+                    competition.qualificationSlots = { champions: 0, europa: 0, relegation: 0 };
                 } else {
-                    const q = competition.qualificationSlots || { champions: 0, europa: 0 };
+                    const q = competition.qualificationSlots || { champions: 0, europa: 0, relegation: 1 };
                     const champions = Math.min(Math.max(0, parseInt(q.champions, 10) || 0), maxTeams);
                     const europa = Math.min(Math.max(0, parseInt(q.europa, 10) || 0), Math.max(0, maxTeams - champions));
-                    competition.qualificationSlots = { champions, europa };
+                    const relegation = Math.min(
+                        Math.max(0, parseInt(q.relegation, 10) || 0),
+                        Math.max(0, maxTeams - champions - europa)
+                    );
+                    competition.qualificationSlots = { champions, europa, relegation };
                 }
             };
 
@@ -4117,19 +4155,22 @@
         };
 
         function getQualificationSlots() {
-            // Solo Liga 1 clasifica a competiciones europeas.
-            if (appState?.activeDomesticLeagueId === 'liga2') {
-                return { champions: 0, europa: 0 };
-            }
-
-            const source = appState?.qualificationSlots || {};
             const parseSlot = (value, fallback) => {
                 const parsed = parseInt(value, 10);
                 return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
             };
+
+            if (appState?.activeDomesticLeagueId === 'liga2') {
+                const liga1 = getDomesticCompetition(appState, 'liga1');
+                const liga1Relegation = parseSlot(liga1?.qualificationSlots?.relegation, 1);
+                return { champions: 0, europa: 0, relegation: liga1Relegation };
+            }
+
+            const source = appState?.qualificationSlots || {};
             return {
                 champions: parseSlot(source.champions, 4),
-                europa: parseSlot(source.europa, 2)
+                europa: parseSlot(source.europa, 2),
+                relegation: parseSlot(source.relegation, 1)
             };
         }
 
@@ -4149,14 +4190,22 @@
             promotionLegend?.classList.toggle('hidden', isLiga1);
             adminControls?.classList.toggle('hidden', !isLiga1);
 
-            // Liga 2 solo muestra "Ascenso"; no tiene cupos europeos.
-            if (!isLiga1) return;
-
             const slots = getQualificationSlots();
+
+            // Liga 2 solo muestra "Ascenso"; no tiene cupos europeos.
+            if (!isLiga1) {
+                const promotionDisplay = document.getElementById('promotion-slot-display');
+                if (promotionDisplay) {
+                    promotionDisplay.textContent = `${slots.relegation} ${slots.relegation === 1 ? 'equipo' : 'equipos'}`;
+                }
+                return;
+            }
             const championsInput = document.getElementById('qualification-champions-input');
             const europaInput = document.getElementById('qualification-europa-input');
+            const relegationInput = document.getElementById('qualification-relegation-input');
             const championsDisplay = document.getElementById('champions-slot-display');
             const europaDisplay = document.getElementById('europa-slot-display');
+            const relegationDisplay = document.getElementById('relegation-slot-display');
 
             if (championsInput) {
                 championsInput.value = slots.champions;
@@ -4166,12 +4215,19 @@
                 europaInput.value = slots.europa;
                 europaInput.max = Math.max(0, teamCount);
             }
+            if (relegationInput) {
+                relegationInput.value = slots.relegation;
+                relegationInput.max = Math.max(0, teamCount);
+            }
 
             if (championsDisplay) {
                 championsDisplay.textContent = `${slots.champions} ${slots.champions === 1 ? 'equipo' : 'equipos'}`;
             }
             if (europaDisplay) {
                 europaDisplay.textContent = `${slots.europa} ${slots.europa === 1 ? 'equipo' : 'equipos'}`;
+            }
+            if (relegationDisplay) {
+                relegationDisplay.textContent = `${slots.relegation} ${slots.relegation === 1 ? 'equipo' : 'equipos'}`;
             }
         }
 
@@ -4191,19 +4247,24 @@
             const teamCount = Math.max(0, getActiveDomesticTeams().length);
             const championsInput = document.getElementById('qualification-champions-input');
             const europaInput = document.getElementById('qualification-europa-input');
+            const relegationInput = document.getElementById('qualification-relegation-input');
 
             let champions = Math.max(0, parseInt(championsInput?.value, 10) || 0);
             let europa = Math.max(0, parseInt(europaInput?.value, 10) || 0);
+            let relegation = Math.max(0, parseInt(relegationInput?.value, 10) || 0);
 
             champions = Math.min(champions, teamCount);
             europa = Math.min(europa, Math.max(0, teamCount - champions));
 
-            appState.qualificationSlots = { champions, europa };
+            const maxRelegation = Math.max(0, teamCount - champions - europa);
+            relegation = Math.min(relegation, maxRelegation);
+
+            appState.qualificationSlots = { champions, europa, relegation };
 
             renderStandings();
             await saveToFirestore();
 
-            showToast(`Cupos de ${getActiveDomesticCompetition()?.name || 'la liga'} guardados: ${champions} Champions · ${europa} Europa`);
+            showToast(`Cupos guardados: ${champions} Champions · ${europa} Europa · ${relegation} Descenso/Ascenso`);
         };
 
         function renderStandings() {
@@ -4216,6 +4277,10 @@
                 qualificationSlots.europa,
                 Math.max(0, standings.length - championsSlots)
             );
+            const movementSlots = Math.min(
+                qualificationSlots.relegation || 0,
+                standings.length
+            );
             renderQualificationControls(standings.length);
             if (standings.length === 0) {
                 standingsBody.innerHTML = `<tr><td colspan="10" class="p-8 text-center text-slate-500"><i class="fa-solid fa-shield-halved text-2xl mb-2"></i><div>Esta liga todavía no tiene equipos.</div></td></tr>`;
@@ -4227,20 +4292,19 @@
                 const isLiga2 = appState?.activeDomesticLeagueId === 'liga2';
 
                 if (isLiga2) {
-                    // Liga 2: el líder asciende.
-                    if (index === 0) {
+                    // Liga 2: ascienden los primeros N según el descenso de Liga 1.
+                    if (movementSlots > 0 && index < movementSlots) {
                         rowRankClass = "rank-promotion";
                     }
                 } else {
-                    // Liga 1: Champions / Europa.
                     if (index < championsSlots) {
                         rowRankClass = "rank-champions";
                     } else if (index < championsSlots + europaSlots) {
                         rowRankClass = "rank-europa";
                     }
 
-                    // El último siempre desciende y la raya roja tiene prioridad.
-                    if (index === standings.length - 1) {
+                    // Los últimos N descienden. La raya roja tiene prioridad.
+                    if (movementSlots > 0 && index >= standings.length - movementSlots) {
                         rowRankClass = "rank-relegation";
                     }
                 }
@@ -9446,7 +9510,7 @@
             applyImageReferrerPolicy(document);
             externalImageObserver.observe(document.body, { childList: true, subtree: true });
             setTimeout(() => { initApplication(); }, 500);
-        }); 
+        });
 
     </script>
 </body>
