@@ -3613,6 +3613,8 @@
             return createLeagueState(getCurrentSeasonLabel(), defaultTeams);
         }
 
+        const normalizedLeagueRuntimeCache = new WeakSet();
+
         function normalizeLeagueState(league) {
             league = league || {};
             league.id = league.id || makeId('liga');
@@ -3688,6 +3690,7 @@
                 league.activeBracketId = activeEdition.id;
             }
             league.bracket = activeEdition.data;
+            normalizedLeagueRuntimeCache.add(league);
             return league;
         }
 
@@ -3783,8 +3786,18 @@
             if (!rootState) return;
             const league = rootState.leagues.find(l => l.id === leagueId) || rootState.leagues[0];
             if (!league) return;
+
             rootState.activeLeagueId = league.id;
-            appState = normalizeLeagueState(league);
+
+            // normalizeRootState ya normaliza todas las temporadas cuando los datos
+            // llegan de Firebase. Al volver a una temporada no repetimos todo ese trabajo.
+            appState = normalizedLeagueRuntimeCache.has(league)
+                ? league
+                : normalizeLeagueState(league);
+
+            // Solo necesitamos re-enlazar la división doméstica activa.
+            bindDomesticCompetition(appState, appState.activeDomesticLeagueId || 'liga1');
+
             if (resetNavigation) {
                 currentMatchday = 1;
                 isEditingFixture = false;
@@ -3824,6 +3837,17 @@
                     leagueSelect.dataset.optionsSignature = signature;
                 }
                 leagueSelect.value = appState.id;
+            }
+
+            const clubSeasonSelect = document.getElementById('club-season-select');
+            if (clubSeasonSelect && rootState) {
+                const ordered = [...rootState.leagues].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                const signature = JSON.stringify(ordered.map(league => [league.id, league.name]));
+                if (clubSeasonSelect.dataset.optionsSignature !== signature) {
+                    clubSeasonSelect.innerHTML = ordered.map(league => `<option value="${league.id}">${league.name}</option>`).join('');
+                    clubSeasonSelect.dataset.optionsSignature = signature;
+                }
+                clubSeasonSelect.value = appState.id;
             }
 
             const editionSelect = document.getElementById('elimination-edition-select');
@@ -4238,9 +4262,9 @@
             const storedLeague = rootState.leagues.find(league => league.id === appState.id);
             if (storedLeague) storedLeague.name = newName;
 
-            await saveToFirestore();
-            renderAll();
+            renderCompetitionSelectors();
             showToast(`Temporada renombrada a "${newName}"`);
+            scheduleSeasonSwitchSave();
         };
 
         window.createNewLeague = async function() {
@@ -4253,21 +4277,53 @@
             const sourceTeams = copyTeams ? appState.teams : [];
             const newLeague = createLeagueState(cleanName, sourceTeams);
             rootState.leagues.push(newLeague);
+            syncActiveDomesticCompetition();
             syncActiveBracketEdition();
             activateLeague(newLeague.id);
-            await saveToFirestore();
+
             renderAll();
             showToast(`Liga ${cleanName} creada`);
+            scheduleSeasonSwitchSave();
         };
+
+        let seasonSwitchSaveTimer = null;
+
+        function scheduleSeasonSwitchSave() {
+            // Los espectadores solo están navegando; no deben intentar cambiar
+            // activeLeagueId global en Firebase.
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) return;
+
+            if (seasonSwitchSaveTimer) {
+                clearTimeout(seasonSwitchSaveTimer);
+            }
+
+            seasonSwitchSaveTimer = setTimeout(() => {
+                seasonSwitchSaveTimer = null;
+                saveToFirestore();
+            }, 220);
+        }
 
         window.switchLeagueSeason = async function(leagueId) {
             if (!rootState || !leagueId || leagueId === appState.id) return;
-            captureTeamEditsFromDom();
+
+            // Solo hay inputs de nombre/logo que capturar si la pestaña Equipos
+            // está realmente abierta. Evita búsquedas DOM innecesarias al navegar.
+            if (document.getElementById('tab-equipos')?.classList.contains('active')) {
+                captureTeamEditsFromDom();
+            }
+
+            syncActiveDomesticCompetition();
             syncActiveBracketEdition();
+
+            // El cambio de estado es local y debe sentirse instantáneo.
             activateLeague(leagueId);
-            await saveToFirestore();
+
+            // Pintamos primero la nueva temporada.
             renderAll();
             showToast(`Temporada ${appState.name} cargada`);
+
+            // Firebase se sincroniza después y varios cambios rápidos se agrupan.
+            scheduleSeasonSwitchSave();
         };
 
         window.deleteLeague = async function(leagueId, historyType = 'league') {
