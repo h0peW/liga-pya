@@ -2202,6 +2202,28 @@
             }
         }
 
+    
+        html.dark #stats-domestic-league-toggle {
+            background: #0f172a !important;
+            border-color: #475569 !important;
+        }
+        html.dark #stats-domestic-league-toggle button:not(.bg-emerald-600) {
+            color: #cbd5e1 !important;
+        }
+
+    
+        #bracket-container .viewer-locked {
+            cursor: default !important;
+            pointer-events: none !important;
+            opacity: 1 !important;
+        }
+
+        #bracket-container input.viewer-locked,
+        #bracket-container select.viewer-locked {
+            color: inherit !important;
+            -webkit-text-fill-color: currentColor !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2465,7 +2487,7 @@
                                 </button>
                             </div>
 
-                            <div class="competition-switcher rounded-lg px-3 py-2 shadow-sm min-w-[150px]">
+                            <div data-admin-only class="competition-switcher rounded-lg px-3 py-2 shadow-sm min-w-[150px]">
                                 <label for="bracket-size-select" class="competition-switcher-label block text-[10px] uppercase tracking-wider font-semibold">Llaves de esta eliminatoria</label>
                                 <select id="bracket-size-select" onchange="changeBracketSize(this.value)" class="competition-switcher-select w-full border-0 p-0 mt-0.5 text-sm font-bold outline-none focus:ring-0">
                                     <option value="1">1 llave · 2 equipos</option>
@@ -2475,19 +2497,19 @@
                                     <option value="8">8 llaves · 16 equipos</option>
                                 </select>
                             </div>
-                            <button onclick="openBackgroundManager('eliminatoria')" class="background-btn font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Cambiar fondo de Eliminatoria">
+                            <button data-admin-only onclick="openBackgroundManager('eliminatoria')" class="background-btn font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Cambiar fondo de Eliminatoria">
                                 <i class="fa-solid fa-image"></i> Fondo
                             </button>
                             <button onclick="openHistory('elimination')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-clock-rotate-left"></i> Historial
                             </button>
-                            <button onclick="createNewElimination()" class="bg-violet-600 hover:bg-violet-700 text-white font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm">
+                            <button data-admin-only onclick="createNewElimination()" class="bg-violet-600 hover:bg-violet-700 text-white font-semibold py-2 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-plus"></i> Nueva Eliminatoria
                             </button>
-                            <button id="btn-generate-bracket" onclick="generateBracketFromStandings()" class="px-3 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 font-semibold rounded-lg transition-colors flex items-center gap-2 text-sm">
+                            <button id="btn-generate-bracket" data-admin-only onclick="generateBracketFromStandings()" class="px-3 py-2 bg-indigo-100 text-indigo-700 hover:bg-indigo-200 font-semibold rounded-lg transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-wand-magic-sparkles"></i> Armar Top 8
                             </button>
-                            <button onclick="saveBracket()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg shadow transition-colors flex items-center gap-2 text-sm">
+                            <button data-admin-only onclick="saveBracket()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 px-3 rounded-lg shadow transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-floppy-disk"></i> Guardar
                             </button>
                         </div>
@@ -2517,6 +2539,16 @@
                             <button onclick="openHistory('stats')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-clock-rotate-left"></i> Historial
                             </button>
+
+                            <div id="stats-domestic-league-toggle" class="hidden items-center rounded-lg border border-slate-300 bg-slate-100 p-1 gap-1">
+                                <button id="stats-liga1-btn" type="button" onclick="switchStatsDomesticLeague('liga1')" class="px-3 py-1.5 rounded-md text-xs font-black transition-colors">
+                                    Liga 1
+                                </button>
+                                <button id="stats-liga2-btn" type="button" onclick="switchStatsDomesticLeague('liga2')" class="px-3 py-1.5 rounded-md text-xs font-black transition-colors">
+                                    Liga 2
+                                </button>
+                            </div>
+
                             <select id="stats-phase-select" onchange="renderStats()" class="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 p-2.5 font-semibold">
                                 <option value="liga">Fase Regular (Liga)</option>
                             </select>
@@ -3944,6 +3976,59 @@
             };
         }
 
+        const VIEWER_ELIMINATION_SELECTION_KEY = 'ligaPyaViewerEliminationSelectionV1';
+
+        function getViewerEliminationSelections() {
+            try {
+                const parsed = JSON.parse(localStorage.getItem(VIEWER_ELIMINATION_SELECTION_KEY) || '{}');
+                return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+            } catch (_) {
+                return {};
+            }
+        }
+
+        function rememberViewerEliminationSelection(leagueId, editionId) {
+            if (!leagueId || !editionId) return;
+            const selections = getViewerEliminationSelections();
+            selections[leagueId] = editionId;
+            try {
+                localStorage.setItem(VIEWER_ELIMINATION_SELECTION_KEY, JSON.stringify(selections));
+            } catch (_) {}
+        }
+
+        function getViewerEliminationSelection(league) {
+            if (!league || !Array.isArray(league.bracketEditions) || league.bracketEditions.length === 0) {
+                return null;
+            }
+
+            const selections = getViewerEliminationSelections();
+            const storedId = selections[league.id];
+            if (storedId && league.bracketEditions.some(edition => edition.id === storedId)) {
+                return storedId;
+            }
+
+            if (league.activeBracketId && league.bracketEditions.some(edition => edition.id === league.activeBracketId)) {
+                return league.activeBracketId;
+            }
+
+            return league.bracketEditions[0]?.id || null;
+        }
+
+        function applyViewerEliminationSelection(league, preferredEditionId = null) {
+            if (!league || !Array.isArray(league.bracketEditions) || league.bracketEditions.length === 0) return;
+
+            const editionId = preferredEditionId && league.bracketEditions.some(e => e.id === preferredEditionId)
+                ? preferredEditionId
+                : getViewerEliminationSelection(league);
+
+            const edition = league.bracketEditions.find(e => e.id === editionId) || league.bracketEditions[0];
+            if (!edition) return;
+
+            league.activeBracketId = edition.id;
+            league.bracket = normalizeBracketData(edition.data || initDefaultBracket(edition.format || edition.initialTies || 4));
+            rememberViewerEliminationSelection(league.id, edition.id);
+        }
+
         function activateLeague(leagueId, resetNavigation = true) {
             if (!rootState) return;
             const league = rootState.leagues.find(l => l.id === leagueId) || rootState.leagues[0];
@@ -4483,6 +4568,11 @@
             // El cambio de estado es local y debe sentirse instantáneo.
             activateLeague(leagueId);
 
+            // Cada espectador conserva su propia eliminatoria seleccionada.
+            if (!isAdmin) {
+                applyViewerEliminationSelection(appState);
+            }
+
             // Pintamos primero la nueva temporada.
             renderAll();
             showToast(`Temporada ${appState.name} cargada`);
@@ -4594,11 +4684,12 @@
         let eliminationSwitchSaveTimer = null;
 
         function scheduleEliminationSwitchSave() {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) return;
+
             if (eliminationSwitchSaveTimer) {
                 clearTimeout(eliminationSwitchSaveTimer);
             }
 
-            // Agrupa cambios rápidos y sincroniza solo el estado más reciente.
             eliminationSwitchSaveTimer = setTimeout(() => {
                 eliminationSwitchSaveTimer = null;
                 saveToFirestore();
@@ -4606,14 +4697,8 @@
         }
 
         window.switchEliminationEdition = async function(editionId) {
-            if (!editionId || editionId === appState.activeBracketId) return;
-
-            // Captura los datos escritos en la eliminatoria actual, pero sin
-            // re-renderizarla ni esperar una escritura en Firebase.
-            if (window.autoSaveBracket) {
-                await window.autoSaveBracket({ persist: false, rerender: false });
-            }
-            syncActiveBracketEdition();
+            if (!editionId || !appState || !Array.isArray(appState.bracketEditions)) return;
+            if (editionId === appState.activeBracketId) return;
 
             const edition = appState.bracketEditions.find(e => e.id === editionId);
             if (!edition) return;
@@ -4624,23 +4709,53 @@
             );
             const savedSize = savedFormat === PRELIMINARY_BRACKET_FORMAT
                 ? 4
-                : normalizeEditionInitialTies(edition.initialTies, getBracketInitialTies(edition.data || initDefaultBracket()));
+                : normalizeEditionInitialTies(
+                    edition.initialTies,
+                    getBracketInitialTies(edition.data || initDefaultBracket())
+                );
+
+            // ESPECTADOR: cambiar de eliminatoria es navegación local.
+            // No toca Firebase, no sincroniza el cuadro anterior y no sigue al admin.
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) {
+                appState.activeBracketId = edition.id;
+                appState.bracket = normalizeBracketData(edition.data || initDefaultBracket(savedFormat));
+                appState.bracket.format = savedFormat;
+                appState.bracket.initialTies = savedSize;
+
+                rememberViewerEliminationSelection(appState.id, edition.id);
+
+                renderCompetitionSelectors();
+                renderBracket();
+                applyCurrentEliminationBackground();
+                applyAdminUiRestrictions();
+                return;
+            }
+
+            // ADMIN: todos los inputs del bracket actualizan el estado en tiempo real.
+            // Cancelamos timers viejos y NO volvemos a leer el DOM completo, evitando
+            // que resultados de una edición terminen escritos en otra.
+            cancelPendingBracketSave();
+            if (eliminationSwitchSaveTimer) {
+                clearTimeout(eliminationSwitchSaveTimer);
+                eliminationSwitchSaveTimer = null;
+            }
+
+            syncActiveBracketEdition();
 
             appState.activeBracketId = edition.id;
             appState.bracket = normalizeBracketData(edition.data || initDefaultBracket(savedFormat));
             appState.bracket.format = savedFormat;
             appState.bracket.initialTies = savedSize;
+
             edition.format = savedFormat;
             edition.initialTies = savedSize;
             edition.data = appState.bracket;
 
-            // Primero pintamos la nueva eliminatoria: el cambio visual es inmediato.
             renderCompetitionSelectors();
             renderBracket();
             applyCurrentEliminationBackground();
             showToast(`${edition.name} cargada · ${getBracketFormatLabel(savedFormat)}`);
 
-            // Firebase se actualiza después, sin bloquear la interfaz.
             scheduleEliminationSwitchSave();
         };
 
@@ -7027,12 +7142,24 @@
         let bracketSaveTimer = null;
 
         function scheduleBracketSave(delay = 320) {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) return;
+
             if (bracketSaveTimer) clearTimeout(bracketSaveTimer);
             bracketSaveTimer = setTimeout(() => {
                 bracketSaveTimer = null;
-                syncActiveBracketEdition();
+
+                // Los controles ya escriben directamente sobre edition.data.
+                // NO llamamos syncActiveBracketEdition aquí: evita que un timer
+                // antiguo termine sincronizando la edición que se abrió después.
                 saveToFirestore();
             }, delay);
+        }
+
+        function cancelPendingBracketSave() {
+            if (bracketSaveTimer) {
+                clearTimeout(bracketSaveTimer);
+                bracketSaveTimer = null;
+            }
         }
 
         function getBracketEntryById(matchId) {
@@ -7131,6 +7258,12 @@
         }
 
         window.onBracketScoreInput = function(input) {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) {
+                // Seguridad UI adicional: un espectador nunca modifica el estado local.
+                renderBracket();
+                applyAdminUiRestrictions();
+                return;
+            }
             if (!input || !appState?.bracket) return;
 
             const matchId = input.dataset.bracketId;
@@ -7170,6 +7303,11 @@
         };
 
         window.onBracketFieldChange = function(input) {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) {
+                renderBracket();
+                applyAdminUiRestrictions();
+                return;
+            }
             if (!input || !appState?.bracket) return;
 
             const matchId = input.dataset.bracketId;
@@ -7289,7 +7427,7 @@
             appState.bracket.format = savedFormat;
             appState.bracket.initialTies = savedInitialTies;
 
-            if (activeEdition) {
+            if (activeEdition && isAdmin && auth?.currentUser?.uid === ADMIN_UID) {
                 activeEdition.format = savedFormat;
                 activeEdition.initialTies = savedInitialTies;
                 activeEdition.data = appState.bracket;
@@ -7297,7 +7435,11 @@
 
             const b = appState.bracket;
             const initialTies = savedInitialTies;
-            syncPreliminaryWinnerSlots(b);
+
+            // La propagación automática modifica el cuadro y por eso es solo admin.
+            if (isAdmin && auth?.currentUser?.uid === ADMIN_UID) {
+                syncPreliminaryWinnerSlots(b);
+            }
             resetBracketOptionCaches();
 
             const sizeSelect = document.getElementById('bracket-size-select');
@@ -7316,8 +7458,16 @@
             }
 
             const trophyImg = b.trophyUrl
-                ? `<img src="${b.trophyUrl}" class="w-12 h-12 mx-auto object-contain cursor-pointer hover:opacity-80 transition-opacity drop-shadow-md" onclick="changeTrophy()" title="Cambiar Trofeo">`
-                : `<i class="fa-solid fa-trophy text-amber-400 text-3xl cursor-pointer hover:text-amber-500 transition-colors drop-shadow-md" onclick="changeTrophy()" title="Añadir imagen de Trofeo"></i>`;
+                ? (
+                    isAdmin
+                        ? `<img src="${b.trophyUrl}" class="w-12 h-12 mx-auto object-contain cursor-pointer hover:opacity-80 transition-opacity drop-shadow-md" onclick="changeTrophy()" title="Cambiar Trofeo">`
+                        : `<img src="${b.trophyUrl}" class="w-12 h-12 mx-auto object-contain drop-shadow-md" alt="Trofeo">`
+                )
+                : (
+                    isAdmin
+                        ? `<i class="fa-solid fa-trophy text-amber-400 text-3xl cursor-pointer hover:text-amber-500 transition-colors drop-shadow-md" onclick="changeTrophy()" title="Añadir imagen de Trofeo"></i>`
+                        : `<i class="fa-solid fa-trophy text-amber-400 text-3xl drop-shadow-md"></i>`
+                );
 
             const tournamentMvpOpts = getAllPlayersOptions(b.tournamentMvp, 'MVP del Torneo');
             const tournamentMvpBlock = `
@@ -9853,6 +10003,62 @@
         }
 
         // --- SISTEMA DE ESTADÍSTICAS ---
+        let statsDomesticLeagueId = null;
+
+        function getStatsDomesticLeagueId() {
+            const preferred = statsDomesticLeagueId || appState?.activeDomesticLeagueId || 'liga1';
+            const exists = (appState?.domesticLeagues || []).some(comp => comp.id === preferred);
+
+            if (exists) {
+                statsDomesticLeagueId = preferred;
+                return preferred;
+            }
+
+            statsDomesticLeagueId = (appState?.domesticLeagues || [])[0]?.id || 'liga1';
+            return statsDomesticLeagueId;
+        }
+
+        function getStatsDomesticCompetition() {
+            return getDomesticCompetition(appState, getStatsDomesticLeagueId());
+        }
+
+        function getStatsDomesticTeams() {
+            return getDomesticTeams(appState, getStatsDomesticLeagueId());
+        }
+
+        window.switchStatsDomesticLeague = function(competitionId) {
+            if (!['liga1', 'liga2'].includes(competitionId)) return;
+            if (!(appState?.domesticLeagues || []).some(comp => comp.id === competitionId)) return;
+
+            statsDomesticLeagueId = competitionId;
+            renderStats();
+        };
+
+        function renderStatsDomesticLeagueToggle(phase) {
+            const toggle = document.getElementById('stats-domestic-league-toggle');
+            const liga1Btn = document.getElementById('stats-liga1-btn');
+            const liga2Btn = document.getElementById('stats-liga2-btn');
+            if (!toggle || !liga1Btn || !liga2Btn) return;
+
+            const show = phase === 'liga';
+            toggle.classList.toggle('hidden', !show);
+            toggle.classList.toggle('flex', show);
+            if (!show) return;
+
+            const activeId = getStatsDomesticLeagueId();
+            const setState = (button, active) => {
+                button.className = active
+                    ? 'px-3 py-1.5 rounded-md text-xs font-black transition-colors bg-emerald-600 text-white shadow-sm'
+                    : 'px-3 py-1.5 rounded-md text-xs font-black transition-colors text-slate-600 hover:bg-white';
+            };
+
+            setState(liga1Btn, activeId === 'liga1');
+            setState(liga2Btn, activeId === 'liga2');
+
+            liga1Btn.textContent = getDomesticCompetition(appState, 'liga1')?.name || 'Liga 1';
+            liga2Btn.textContent = getDomesticCompetition(appState, 'liga2')?.name || 'Liga 2';
+        }
+
         function getStatsPhaseBracketEdition(phase) {
             if (!phase || phase === 'liga') return null;
 
@@ -9940,16 +10146,21 @@
             };
 
             if (phase === 'liga') {
-                appState.matches.forEach(m => { 
-                    processLineup(m.lineupHome); processLineup(m.lineupAway); 
+                const statsCompetition = getStatsDomesticCompetition();
+                const statsMatches = Array.isArray(statsCompetition?.matches) ? statsCompetition.matches : [];
+                const statsMatchdayMvps = statsCompetition?.matchdayMvps && typeof statsCompetition.matchdayMvps === 'object'
+                    ? statsCompetition.matchdayMvps
+                    : {};
+
+                statsMatches.forEach(m => {
+                    processLineup(m.lineupHome);
+                    processLineup(m.lineupAway);
                     if (m.mvp && stats[m.mvp]) stats[m.mvp].mvpMatch += 1;
                 });
-                
-                if (appState.matchdayMvps) {
-                    Object.values(appState.matchdayMvps).forEach(mvpId => {
-                        if (mvpId && stats[mvpId]) stats[mvpId].mvpMatchday += 1;
-                    });
-                }
+
+                Object.values(statsMatchdayMvps).forEach(mvpId => {
+                    if (mvpId && stats[mvpId]) stats[mvpId].mvpMatchday += 1;
+                });
             } else {
                 const edition = getStatsPhaseBracketEdition(phase);
                 const selectedBracket = edition?.data || null;
@@ -9991,11 +10202,13 @@
 
         window.renderStats = function() {
             const phase = renderStatsPhaseOptions();
+            renderStatsDomesticLeagueToggle(phase);
 
             const competitionLabel = document.getElementById('stats-competition-label');
             if (competitionLabel) {
                 if (phase === 'liga') {
-                    competitionLabel.textContent = 'Fase Regular (Liga)';
+                    const statsCompetition = getStatsDomesticCompetition();
+                    competitionLabel.textContent = `${statsCompetition?.name || 'Liga'} · Fase Regular`;
                 } else {
                     const edition = getStatsPhaseBracketEdition(phase);
                     competitionLabel.textContent = edition
@@ -10851,8 +11064,10 @@
             });
         }
 
-        function buildStandingsEvolution(maxRoundPlayed) {
-            const activeTeams = getActiveDomesticTeams();
+        function buildStandingsEvolution(maxRoundPlayed, competitionId = getStatsDomesticLeagueId()) {
+            const activeTeams = getDomesticTeams(appState, competitionId);
+            const competition = getDomesticCompetition(appState, competitionId);
+            const competitionMatches = Array.isArray(competition?.matches) ? competition.matches : [];
             const table = {};
             const history = {};
 
@@ -10862,7 +11077,7 @@
             });
 
             const byRound = new Map();
-            (appState.matches || []).forEach(match => {
+            competitionMatches.forEach(match => {
                 const round = Number(match.round) || 0;
                 if (round < 1 || round > maxRoundPlayed) return;
                 if (match.homeGoals === null || match.awayGoals === null || match.homeGoals === '' || match.awayGoals === '') return;
@@ -10901,9 +11116,12 @@
             return history;
         }
 
-        function buildScorerEvolution(maxRoundPlayed) {
+        function buildScorerEvolution(maxRoundPlayed, competitionId = getStatsDomesticLeagueId()) {
             const players = {};
-            getActiveDomesticTeams().forEach(team => {
+            const competition = getDomesticCompetition(appState, competitionId);
+            const competitionMatches = Array.isArray(competition?.matches) ? competition.matches : [];
+
+            getDomesticTeams(appState, competitionId).forEach(team => {
                 (team.players || []).forEach(player => {
                     players[player.id] = {
                         id: player.id,
@@ -10915,7 +11133,7 @@
             });
 
             const matchesByRound = new Map();
-            (appState.matches || []).forEach(match => {
+            competitionMatches.forEach(match => {
                 const round = Number(match.round) || 0;
                 if (round < 1 || round > maxRoundPlayed) return;
                 if (!matchesByRound.has(round)) matchesByRound.set(round, []);
@@ -10977,7 +11195,12 @@
             const legendColor = '#cbd5e1';
             const axisBorderColor = '#64748b';
             
-            const playedMatches = appState.matches.filter(m => m.homeGoals !== null && m.homeGoals !== "");
+            const statsCompetitionId = getStatsDomesticLeagueId();
+            const statsCompetition = getDomesticCompetition(appState, statsCompetitionId);
+            const statsMatches = Array.isArray(statsCompetition?.matches) ? statsCompetition.matches : [];
+            const statsTeams = getDomesticTeams(appState, statsCompetitionId);
+
+            const playedMatches = statsMatches.filter(m => m.homeGoals !== null && m.homeGoals !== "");
             const maxRoundPlayed = playedMatches.length > 0 ? Math.max(...playedMatches.map(m => m.round)) : 1;
             const labels = Array.from({length: maxRoundPlayed}, (_, i) => `${i + 1}.0`);
             
@@ -10997,7 +11220,7 @@
             ];
 
             if (chartType === 'posiciones') {
-                const teamHistory = buildStandingsEvolution(maxRoundPlayed);
+                const teamHistory = buildStandingsEvolution(maxRoundPlayed, statsCompetitionId);
 
                 datasets = Object.values(teamHistory).map((th, i) => ({
                     label: th.label,
@@ -11015,7 +11238,7 @@
                 yAxisConfig = {
                     reverse: true,
                     min: 1,
-                    max: Math.max(1, getActiveDomesticTeams().length),
+                    max: Math.max(1, statsTeams.length),
                     ticks: {
                         stepSize: 1,
                         color: textColor,
@@ -11036,7 +11259,7 @@
                     }
                 };
             } else if (chartType === 'goleadores') {
-                const playerHistory = buildScorerEvolution(maxRoundPlayed);
+                const playerHistory = buildScorerEvolution(maxRoundPlayed, statsCompetitionId);
 
                 datasets = Object.values(playerHistory).map((ph, i) => ({
                     label: ph.label,
@@ -11765,6 +11988,16 @@
                     }
                 }
             });
+
+            // El selector de eliminatoria sigue siendo público, pero TODO campo
+            // dentro del cuadro (equipos, marcadores y MVP) es estrictamente read-only
+            // para espectadores.
+            document.querySelectorAll('#bracket-container input, #bracket-container select').forEach(field => {
+                field.disabled = !isAdmin;
+                field.classList.toggle('viewer-locked', !isAdmin);
+                if (!isAdmin) field.setAttribute('tabindex', '-1');
+                else field.removeAttribute('tabindex');
+            });
         }
 
         function installAdminGuards() {
@@ -11930,7 +12163,21 @@
 
                 onAuthStateChanged(auth, async (user) => {
                     isAdmin = !!user && user.uid === ADMIN_UID;
+
+                    if (!isAdmin && appState) {
+                        applyViewerEliminationSelection(appState);
+                    }
+
                     applyAdminMode();
+
+                    if (appState) {
+                        renderCompetitionSelectors();
+                        if (document.getElementById('tab-eliminatoria')?.classList.contains('active')) {
+                            renderBracket();
+                            applyCurrentEliminationBackground();
+                        }
+                        applyAdminUiRestrictions();
+                    }
 
                     if (isAdmin && cloudDocRef) {
                         try {
@@ -12015,12 +12262,33 @@
                     return;
                 }
 
+                // Conservamos la navegación LOCAL del espectador antes de sustituir
+                // el estado recibido desde Firebase.
+                const viewerLeagueId = !isAdmin ? appState?.id : null;
+                const viewerEditionId = !isAdmin ? appState?.activeBracketId : null;
+
+                if (!isAdmin && viewerLeagueId && viewerEditionId) {
+                    rememberViewerEliminationSelection(viewerLeagueId, viewerEditionId);
+                }
+
                 lastCloudSnapshot = deepClone(raw);
                 lastCloudSnapshotSignature = rawSignature;
                 const incoming = normalizeRootState(raw);
+
+                // El activeLeagueId/activeBracketId guardados por el administrador
+                // son su navegación, no la del espectador.
+                if (!isAdmin && viewerLeagueId && incoming.leagues.some(league => league.id === viewerLeagueId)) {
+                    incoming.activeLeagueId = viewerLeagueId;
+                }
+
                 const previousLeagueId = appState?.id;
                 rootState = incoming;
                 activateLeague(rootState.activeLeagueId, previousLeagueId !== rootState.activeLeagueId);
+
+                if (!isAdmin) {
+                    applyViewerEliminationSelection(appState, viewerEditionId);
+                }
+
                 safeSetLocalStorage(CLOUD_CACHE_KEY, rawSignature || JSON.stringify(getPersistableState()));
                 renderAll();
                 applyAdminUiRestrictions();
