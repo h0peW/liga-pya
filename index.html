@@ -2130,6 +2130,78 @@
             contain-intrinsic-size: auto 88px;
         }
 
+    
+        /* ---------- FINANZAS DE CLUBES (SOLO ADMIN) ---------- */
+        .finance-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: .8rem;
+        }
+        .finance-summary-card {
+            background: linear-gradient(135deg, #ffffff, #f8fafc);
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1rem;
+            box-shadow: 0 6px 18px rgba(15,23,42,.06);
+        }
+        .finance-summary-label {
+            font-size: 10px;
+            text-transform: uppercase;
+            letter-spacing: .08em;
+            font-weight: 900;
+            color: #64748b;
+        }
+        .finance-summary-value {
+            margin-top: .25rem;
+            font-size: 1.45rem;
+            line-height: 1.2;
+            font-weight: 950;
+            color: #0f172a;
+        }
+        .finance-team-card {
+            background: #fff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            padding: 1rem;
+            box-shadow: 0 5px 16px rgba(15,23,42,.05);
+        }
+        .finance-balance-positive { color: #059669; }
+        .finance-balance-negative { color: #dc2626; }
+        .finance-transaction-row {
+            display: grid;
+            grid-template-columns: minmax(150px, 1fr) minmax(130px, 1.5fr) 115px 105px;
+            gap: .75rem;
+            align-items: center;
+            padding: .7rem .8rem;
+            border-top: 1px solid #e2e8f0;
+        }
+        .finance-prize-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 150px;
+            gap: .75rem;
+            align-items: center;
+            padding: .65rem 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        html.dark .finance-summary-card,
+        html.dark .finance-team-card {
+            background: #0f172a;
+            border-color: #334155;
+        }
+        html.dark .finance-summary-label { color: #94a3b8; }
+        html.dark .finance-summary-value { color: #f8fafc; }
+        html.dark .finance-transaction-row,
+        html.dark .finance-prize-row { border-color: #334155; }
+        @media (max-width: 780px) {
+            .finance-summary-grid { grid-template-columns: 1fr; }
+            .finance-transaction-row {
+                grid-template-columns: 1fr auto;
+            }
+            .finance-transaction-row .finance-tx-description {
+                grid-column: 1 / -1;
+            }
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2191,6 +2263,9 @@
                 </button>
                 <button onclick="switchTab('equipos')" id="tab-btn-equipos" data-admin-only class="px-4 py-2 rounded-md font-medium text-sm transition-colors text-white hover:bg-emerald-600/50 whitespace-nowrap">
                     <i class="fa-solid fa-shield-halved mr-1"></i> Equipos
+                </button>
+                <button onclick="switchTab('finanzas')" id="tab-btn-finanzas" data-admin-only class="px-4 py-2 rounded-md font-medium text-sm transition-colors text-white hover:bg-emerald-600/50 whitespace-nowrap">
+                    <i class="fa-solid fa-sack-dollar mr-1"></i> Finanzas
                 </button>
                 <button onclick="switchTab('traspasos')" id="tab-btn-traspasos" class="px-4 py-2 rounded-md font-medium text-sm transition-colors text-white hover:bg-emerald-600/50 whitespace-nowrap">
                     <i class="fa-solid fa-right-left mr-1"></i> Traspasos
@@ -2686,6 +2761,59 @@
                 </div>
             </div>
 
+
+
+            <!-- TAB: FINANZAS (SOLO ADMIN) -->
+            <div id="tab-finanzas" class="tab-content" data-admin-only>
+                <div class="glass-panel p-5 md:p-6">
+                    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-6">
+                        <div>
+                            <h2 class="text-xl font-bold text-slate-700 flex items-center gap-2">
+                                <i class="fa-solid fa-sack-dollar text-emerald-600"></i> Finanzas de Clubes
+                            </h2>
+                            <p class="text-sm text-slate-500 mt-1">Presupuestos, fichajes y premios de competiciones. Solo visible para administradores.</p>
+                        </div>
+                        <div class="min-w-[210px]">
+                            <label for="finance-season-select" class="block text-[10px] uppercase tracking-wider text-slate-500 font-black mb-1">Temporada</label>
+                            <select id="finance-season-select" onchange="switchFinanceSeason(this.value)" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg p-2.5 font-bold"></select>
+                        </div>
+                    </div>
+
+                    <div id="finance-summary" class="finance-summary-grid mb-6"></div>
+
+                    <div class="grid grid-cols-1 xl:grid-cols-[1.35fr_.85fr] gap-5">
+                        <section class="bg-slate-50 border border-slate-200 rounded-2xl p-4 md:p-5">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div>
+                                    <h3 class="font-black text-slate-800">Presupuesto por equipo</h3>
+                                    <p class="text-xs text-slate-500 mt-1">Los importes de este panel se expresan en millones (M€).</p>
+                                </div>
+                            </div>
+                            <div id="finance-teams-grid" class="grid grid-cols-1 md:grid-cols-2 gap-3"></div>
+                        </section>
+
+                        <section class="bg-slate-50 border border-slate-200 rounded-2xl p-4 md:p-5">
+                            <h3 class="font-black text-slate-800">Premios automáticos</h3>
+                            <p class="text-xs text-slate-500 mt-1 mb-3">Configura cuánto recibe el campeón. El sistema evita pagos duplicados.</p>
+                            <div id="finance-prizes"></div>
+                            <button onclick="saveFinancePrizeSettings()" class="mt-4 w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 px-4 rounded-lg transition-colors">
+                                <i class="fa-solid fa-floppy-disk mr-1"></i> Guardar premios y comprobar campeones
+                            </button>
+                        </section>
+                    </div>
+
+                    <section class="mt-6 bg-white border border-slate-200 rounded-2xl overflow-hidden">
+                        <div class="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                            <div>
+                                <h3 class="font-black text-slate-800">Últimos movimientos</h3>
+                                <p class="text-xs text-slate-500 mt-1">Ajustes manuales, costes de fichajes y premios cobrados.</p>
+                            </div>
+                            <span class="text-[10px] font-black uppercase tracking-wider text-slate-400">M€</span>
+                        </div>
+                        <div id="finance-transactions"></div>
+                    </section>
+                </div>
+            </div>
 
             <!-- TAB: TRASPASOS -->
             <div id="tab-traspasos" class="tab-content">
@@ -3748,12 +3876,43 @@
             return normalized;
         }
 
+
+        function normalizeFinances(raw) {
+            const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+            const balances = source.balances && typeof source.balances === 'object' && !Array.isArray(source.balances)
+                ? source.balances
+                : {};
+            const transactions = Array.isArray(source.transactions) ? source.transactions : [];
+            const prizes = source.prizes && typeof source.prizes === 'object' && !Array.isArray(source.prizes)
+                ? source.prizes
+                : {};
+
+            const normalizedBalances = {};
+            Object.entries(balances).forEach(([teamId, value]) => {
+                const amount = Number(value);
+                normalizedBalances[teamId] = Number.isFinite(amount) ? amount : 0;
+            });
+
+            return {
+                balances: normalizedBalances,
+                transactions: transactions
+                    .filter(item => item && item.id && item.teamId)
+                    .map(item => ({
+                        ...item,
+                        amount: Number.isFinite(Number(item.amount)) ? Number(item.amount) : 0,
+                        createdAt: item.createdAt || new Date().toISOString()
+                    })),
+                prizes
+            };
+        }
+
         function normalizeRootState(raw) {
             if (raw && raw.version === DATA_VERSION && Array.isArray(raw.leagues)) {
                 raw.leagues = raw.leagues.map(normalizeLeagueState);
                 raw.playerAwards = normalizePlayerAwards(raw.playerAwards);
                 raw.playerProfiles = normalizePlayerProfiles(raw.playerProfiles);
                 raw.teamTrophies = normalizeTeamTrophies(raw.teamTrophies);
+                raw.finances = normalizeFinances(raw.finances);
                 if (raw.leagues.length === 0) raw.leagues.push(generateDefaultData());
                 if (!raw.leagues.some(l => l.id === raw.activeLeagueId)) raw.activeLeagueId = raw.leagues[0].id;
                 return raw;
@@ -3778,7 +3937,8 @@
                 leagues: [league],
                 playerAwards: normalizePlayerAwards(raw?.playerAwards),
                 playerProfiles: normalizePlayerProfiles(raw?.playerProfiles),
-                teamTrophies: normalizeTeamTrophies(raw?.teamTrophies)
+                teamTrophies: normalizeTeamTrophies(raw?.teamTrophies),
+                finances: normalizeFinances(raw?.finances)
             };
         }
 
@@ -3947,6 +4107,9 @@
                     break;
                 case 'equipos':
                     renderTeamsConfig();
+                    break;
+                case 'finanzas':
+                    renderFinances();
                     break;
                 case 'traspasos':
                     renderTransfers();
@@ -7057,6 +7220,479 @@
         };
 
 
+
+        // --- FINANZAS DE CLUBES ---
+        function getFinanceStore() {
+            if (!rootState) return normalizeFinances(null);
+            rootState.finances = normalizeFinances(rootState.finances);
+            return rootState.finances;
+        }
+
+        function getTeamFinanceBalance(teamId) {
+            const store = getFinanceStore();
+            const value = Number(store.balances[teamId]);
+            return Number.isFinite(value) ? value : 0;
+        }
+
+        function setTeamFinanceBalance(teamId, amount) {
+            const store = getFinanceStore();
+            const value = Number(amount);
+            store.balances[teamId] = Number.isFinite(value) ? Math.round(value * 1000) / 1000 : 0;
+            return store.balances[teamId];
+        }
+
+        function formatFinanceAmount(amount, signed = false) {
+            const value = Number(amount) || 0;
+            const prefix = signed && value > 0 ? '+' : '';
+            return `${prefix}${value.toLocaleString('es-ES', { minimumFractionDigits: 0, maximumFractionDigits: 3 })} M€`;
+        }
+
+        function financeRound(value) {
+            return Math.round((Number(value) || 0) * 1000) / 1000;
+        }
+
+        function upsertFinanceTransaction(transaction) {
+            const store = getFinanceStore();
+            const amount = financeRound(transaction.amount);
+            const index = store.transactions.findIndex(item => item.id === transaction.id);
+            const previous = index >= 0 ? store.transactions[index] : null;
+
+            if (previous) {
+                setTeamFinanceBalance(previous.teamId, getTeamFinanceBalance(previous.teamId) - (Number(previous.amount) || 0));
+            }
+
+            if (!transaction.teamId || !Number.isFinite(amount) || amount === 0) {
+                if (index >= 0) store.transactions.splice(index, 1);
+                return null;
+            }
+
+            const normalized = {
+                ...transaction,
+                amount,
+                createdAt: transaction.createdAt || previous?.createdAt || new Date().toISOString(),
+                updatedAt: new Date().toISOString()
+            };
+
+            if (index >= 0) store.transactions[index] = normalized;
+            else store.transactions.push(normalized);
+
+            setTeamFinanceBalance(normalized.teamId, getTeamFinanceBalance(normalized.teamId) + amount);
+            return normalized;
+        }
+
+        function removeFinanceTransaction(transactionId) {
+            const store = getFinanceStore();
+            const index = store.transactions.findIndex(item => item.id === transactionId);
+            if (index < 0) return false;
+            const previous = store.transactions[index];
+            setTeamFinanceBalance(previous.teamId, getTeamFinanceBalance(previous.teamId) - (Number(previous.amount) || 0));
+            store.transactions.splice(index, 1);
+            return true;
+        }
+
+        function parseFinanceNumber(raw) {
+            if (raw === null || raw === undefined) return 0;
+            let s = String(raw).trim();
+            if (!s) return 0;
+
+            const upper = s.toUpperCase();
+            const hasMillion = /(^|[^A-Z])M([^A-Z]|$)|M€|M\$|MILL/.test(upper);
+            const hasThousand = /(^|[^A-Z])K([^A-Z]|$)|MIL/.test(upper);
+
+            s = s.replace(/[^\d.,-]/g, '');
+            if (!s || s === '-') return 0;
+
+            const dotCount = (s.match(/\./g) || []).length;
+            const commaCount = (s.match(/,/g) || []).length;
+
+            // 10.000.000 / 10,000,000 -> entero absoluto.
+            if ((dotCount > 1 && commaCount === 0) || (commaCount > 1 && dotCount === 0)) {
+                s = s.replace(/[.,]/g, '');
+            } else if (dotCount === 1 && commaCount === 1) {
+                // El último separador se interpreta como decimal.
+                if (s.lastIndexOf(',') > s.lastIndexOf('.')) {
+                    s = s.replace(/\./g, '').replace(',', '.');
+                } else {
+                    s = s.replace(/,/g, '');
+                }
+            } else if (commaCount === 1 && dotCount === 0) {
+                const decimals = s.length - s.lastIndexOf(',') - 1;
+                s = decimals <= 2 ? s.replace(',', '.') : s.replace(',', '');
+            } else if (dotCount === 1 && commaCount === 0) {
+                const decimals = s.length - s.lastIndexOf('.') - 1;
+                if (decimals === 3 && Math.abs(Number(s.replace('.', ''))) >= 1000) {
+                    s = s.replace('.', '');
+                }
+            }
+
+            let value = Number(s);
+            if (!Number.isFinite(value)) return 0;
+
+            if (hasMillion) return financeRound(value);
+            if (hasThousand) return financeRound(value / 1000);
+
+            // Si viene como 10.000.000 €, convertir a millones.
+            if (Math.abs(value) >= 100000) return financeRound(value / 1000000);
+
+            // En el panel y en cantidades como "25" interpretamos millones.
+            return financeRound(value);
+        }
+
+        function getTransferFinanceAmount(transfer) {
+            if (!transfer) return 0;
+            if (Number.isFinite(Number(transfer.financeAmount))) {
+                return Math.max(0, financeRound(transfer.financeAmount));
+            }
+            return Math.max(0, parseFinanceNumber(transfer.fee ?? transfer.amount ?? ''));
+        }
+
+        function syncTransferFinanceImpact(transfer) {
+            if (!transfer?.id) return;
+            const transactionId = `transfer-buy:${transfer.id}`;
+            const amount = getTransferFinanceAmount(transfer);
+
+            if (!transfer.toTeamId || transfer.toTeamId === FREE_AGENT_TEAM_ID || amount <= 0) {
+                removeFinanceTransaction(transactionId);
+                return;
+            }
+
+            const destination = (appState.teams || []).find(team => team.id === transfer.toTeamId);
+            upsertFinanceTransaction({
+                id: transactionId,
+                teamId: transfer.toTeamId,
+                amount: -amount,
+                type: 'transfer',
+                label: `Fichaje: ${transfer.playerName || 'Jugador'}`,
+                detail: `${destination?.name || 'Equipo'} · ${transfer.fee || formatFinanceAmount(amount)}`,
+                leagueId: appState.id,
+                sourceId: transfer.id,
+                createdAt: transfer.announcedAt || transfer.createdAt || new Date().toISOString()
+            });
+        }
+
+        function getFinancePrizeConfig(league = appState) {
+            const store = getFinanceStore();
+            if (!league) return { liga1: 0, liga2: 0, eliminations: {} };
+            const current = store.prizes[league.id] && typeof store.prizes[league.id] === 'object'
+                ? store.prizes[league.id]
+                : {};
+            if (!current.eliminations || typeof current.eliminations !== 'object') current.eliminations = {};
+            current.liga1 = Number(current.liga1) || 0;
+            current.liga2 = Number(current.liga2) || 0;
+            store.prizes[league.id] = current;
+            return current;
+        }
+
+        function getDomesticChampionForFinance(league, competitionId) {
+            const competition = getDomesticCompetition(league, competitionId);
+            const teams = getDomesticTeams(league, competitionId);
+            const matches = Array.isArray(competition?.matches) ? competition.matches : [];
+            if (!competition || teams.length < 2 || matches.length === 0) return null;
+
+            const completed = matches.every(match =>
+                match.homeGoals !== null && match.homeGoals !== undefined && match.homeGoals !== '' &&
+                match.awayGoals !== null && match.awayGoals !== undefined && match.awayGoals !== ''
+            );
+            if (!completed) return null;
+
+            const table = {};
+            teams.forEach(team => {
+                table[team.id] = { ...team, pts: 0, gf: 0, gc: 0, dg: 0 };
+            });
+
+            matches.forEach(match => {
+                const home = table[match.homeId];
+                const away = table[match.awayId];
+                if (!home || !away) return;
+                const h = parseInt(match.homeGoals, 10);
+                const a = parseInt(match.awayGoals, 10);
+                if (!Number.isFinite(h) || !Number.isFinite(a)) return;
+                home.gf += h; home.gc += a;
+                away.gf += a; away.gc += h;
+                if (h > a) home.pts += 3;
+                else if (a > h) away.pts += 3;
+                else { home.pts += 1; away.pts += 1; }
+            });
+
+            const ordered = Object.values(table)
+                .map(team => ({ ...team, dg: team.gf - team.gc }))
+                .sort((a, b) => b.pts - a.pts || b.dg - a.dg || b.gf - a.gf);
+
+            return ordered[0] || null;
+        }
+
+        function reconcileCompetitionPrize(transactionId, champion, amount, label, leagueId, sourceId) {
+            const prize = Math.max(0, financeRound(amount));
+            if (!champion || prize <= 0) {
+                removeFinanceTransaction(transactionId);
+                return;
+            }
+
+            upsertFinanceTransaction({
+                id: transactionId,
+                teamId: champion.id,
+                amount: prize,
+                type: 'prize',
+                label,
+                detail: `Temporada ${(rootState?.leagues || []).find(l => l.id === leagueId)?.name || ''}`,
+                leagueId,
+                sourceId,
+                createdAt: new Date().toISOString()
+            });
+        }
+
+        function syncAutomaticCompetitionPrizes(league = appState) {
+            if (!league || !rootState) return false;
+            const store = getFinanceStore();
+            const before = JSON.stringify({
+                balances: store.balances,
+                transactions: store.transactions
+            });
+
+            const config = getFinancePrizeConfig(league);
+
+            const liga1Champion = getDomesticChampionForFinance(league, 'liga1');
+            reconcileCompetitionPrize(
+                `prize:${league.id}:liga1`,
+                liga1Champion,
+                config.liga1,
+                `Premio campeón · Liga 1`,
+                league.id,
+                'liga1'
+            );
+
+            const liga2Champion = getDomesticChampionForFinance(league, 'liga2');
+            reconcileCompetitionPrize(
+                `prize:${league.id}:liga2`,
+                liga2Champion,
+                config.liga2,
+                `Premio campeón · Liga 2`,
+                league.id,
+                'liga2'
+            );
+
+            (league.bracketEditions || []).forEach(edition => {
+                const champion = getBracketChampion(league, edition.data);
+                const amount = Number(config.eliminations?.[edition.id]) || 0;
+                reconcileCompetitionPrize(
+                    `prize:${league.id}:elim:${edition.id}`,
+                    champion,
+                    amount,
+                    `Premio campeón · ${edition.name}`,
+                    league.id,
+                    edition.id
+                );
+            });
+
+            return before !== JSON.stringify({
+                balances: store.balances,
+                transactions: store.transactions
+            });
+        }
+
+        window.applyManualFinanceAdjustment = async function(teamId, direction) {
+            if (!adminActionAllowed()) return;
+
+            const amountInput = document.getElementById(`finance-amount-${teamId}`);
+            const reasonInput = document.getElementById(`finance-reason-${teamId}`);
+            const rawAmount = parseFinanceNumber(amountInput?.value || '');
+            if (!rawAmount || rawAmount <= 0) {
+                showToast('Escribe una cantidad mayor que 0');
+                return;
+            }
+
+            const team = (appState.teams || []).find(item => item.id === teamId);
+            const amount = direction === 'subtract' ? -rawAmount : rawAmount;
+            upsertFinanceTransaction({
+                id: makeId('finance'),
+                teamId,
+                amount,
+                type: 'manual',
+                label: amount > 0 ? 'Ingreso manual' : 'Retiro manual',
+                detail: reasonInput?.value?.trim() || 'Ajuste del administrador',
+                leagueId: appState.id,
+                createdAt: new Date().toISOString()
+            });
+
+            if (amountInput) amountInput.value = '';
+            if (reasonInput) reasonInput.value = '';
+
+            await saveToFirestore();
+            renderFinances();
+            showToast(`${team?.name || 'Equipo'}: ${formatFinanceAmount(amount, true)}`);
+        };
+
+        window.saveFinancePrizeSettings = async function() {
+            if (!adminActionAllowed()) return;
+            const config = getFinancePrizeConfig(appState);
+
+            config.liga1 = Math.max(0, parseFinanceNumber(document.getElementById('finance-prize-liga1')?.value || '0'));
+            config.liga2 = Math.max(0, parseFinanceNumber(document.getElementById('finance-prize-liga2')?.value || '0'));
+            config.eliminations = config.eliminations || {};
+
+            (appState.bracketEditions || []).forEach(edition => {
+                config.eliminations[edition.id] = Math.max(
+                    0,
+                    parseFinanceNumber(document.getElementById(`finance-prize-elim-${edition.id}`)?.value || '0')
+                );
+            });
+
+            syncAutomaticCompetitionPrizes(appState);
+            await saveToFirestore();
+            renderFinances();
+            showToast('Premios guardados y finanzas actualizadas');
+        };
+
+        window.switchFinanceSeason = async function(leagueId) {
+            if (!leagueId || leagueId === appState?.id) return;
+            await window.switchLeagueSeason(leagueId);
+            if (isAdmin) {
+                switchTab('finanzas');
+            }
+        };
+
+        function renderFinances() {
+            if (!isAdmin || !rootState || !appState) return;
+
+            const seasonSelect = document.getElementById('finance-season-select');
+            if (seasonSelect) {
+                const ordered = [...(rootState.leagues || [])].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                seasonSelect.innerHTML = ordered.map(league =>
+                    `<option value="${escapeTransferText(league.id)}" ${league.id === appState.id ? 'selected' : ''}>${escapeTransferText(league.name)}</option>`
+                ).join('');
+            }
+
+            const store = getFinanceStore();
+            const teams = appState.teams || [];
+            const totalBalance = teams.reduce((sum, team) => sum + getTeamFinanceBalance(team.id), 0);
+            const positiveTeams = teams.filter(team => getTeamFinanceBalance(team.id) >= 0).length;
+            const transferSpend = store.transactions
+                .filter(tx => tx.type === 'transfer' && tx.leagueId === appState.id)
+                .reduce((sum, tx) => sum + Math.abs(Number(tx.amount) || 0), 0);
+
+            const summary = document.getElementById('finance-summary');
+            if (summary) {
+                summary.innerHTML = `
+                    <div class="finance-summary-card">
+                        <div class="finance-summary-label">Fondos totales</div>
+                        <div class="finance-summary-value ${totalBalance < 0 ? 'finance-balance-negative' : 'finance-balance-positive'}">${formatFinanceAmount(totalBalance)}</div>
+                    </div>
+                    <div class="finance-summary-card">
+                        <div class="finance-summary-label">Clubes con saldo ≥ 0</div>
+                        <div class="finance-summary-value">${positiveTeams} / ${teams.length}</div>
+                    </div>
+                    <div class="finance-summary-card">
+                        <div class="finance-summary-label">Gasto en fichajes · ${escapeTransferText(appState.name)}</div>
+                        <div class="finance-summary-value">${formatFinanceAmount(transferSpend)}</div>
+                    </div>`;
+            }
+
+            const teamsGrid = document.getElementById('finance-teams-grid');
+            if (teamsGrid) {
+                teamsGrid.innerHTML = teams.map(team => {
+                    const balance = getTeamFinanceBalance(team.id);
+                    return `
+                        <div class="finance-team-card">
+                            <div class="flex items-center gap-3">
+                                <img src="${escapeTransferText(team.logo || transferPlaceholder(64, 'E'))}" referrerpolicy="no-referrer" class="w-12 h-12 rounded-full object-contain bg-white border border-slate-200" onerror="this.style.visibility='hidden'">
+                                <div class="min-w-0 flex-1">
+                                    <div class="font-black text-slate-800 truncate">${escapeTransferText(team.name)}</div>
+                                    <div class="text-xl font-black mt-0.5 ${balance < 0 ? 'finance-balance-negative' : 'finance-balance-positive'}">${formatFinanceAmount(balance)}</div>
+                                </div>
+                            </div>
+                            <div class="grid grid-cols-1 gap-2 mt-3">
+                                <input id="finance-amount-${escapeTransferText(team.id)}" type="number" min="0" step="0.1" placeholder="Cantidad (ej. 50)"
+                                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                                <input id="finance-reason-${escapeTransferText(team.id)}" type="text" placeholder="Motivo opcional"
+                                    class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+                                <div class="grid grid-cols-2 gap-2">
+                                    <button onclick="applyManualFinanceAdjustment('${escapeTransferText(team.id)}','add')" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2 rounded-lg text-sm">
+                                        <i class="fa-solid fa-plus mr-1"></i> Añadir
+                                    </button>
+                                    <button onclick="applyManualFinanceAdjustment('${escapeTransferText(team.id)}','subtract')" class="bg-red-50 hover:bg-red-100 border border-red-200 text-red-700 font-bold py-2 rounded-lg text-sm">
+                                        <i class="fa-solid fa-minus mr-1"></i> Restar
+                                    </button>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            const prizeConfig = getFinancePrizeConfig(appState);
+            const prizes = document.getElementById('finance-prizes');
+            if (prizes) {
+                const rows = [
+                    {
+                        label: 'Campeón Liga 1',
+                        id: 'finance-prize-liga1',
+                        value: prizeConfig.liga1 || 0,
+                        champion: getDomesticChampionForFinance(appState, 'liga1')
+                    },
+                    {
+                        label: 'Campeón Liga 2',
+                        id: 'finance-prize-liga2',
+                        value: prizeConfig.liga2 || 0,
+                        champion: getDomesticChampionForFinance(appState, 'liga2')
+                    },
+                    ...(appState.bracketEditions || []).map(edition => ({
+                        label: `Campeón · ${edition.name}`,
+                        id: `finance-prize-elim-${edition.id}`,
+                        value: prizeConfig.eliminations?.[edition.id] || 0,
+                        champion: getBracketChampion(appState, edition.data)
+                    }))
+                ];
+
+                prizes.innerHTML = rows.map(row => `
+                    <div class="finance-prize-row">
+                        <div class="min-w-0">
+                            <div class="font-bold text-slate-700 truncate">${escapeTransferText(row.label)}</div>
+                            <div class="text-[10px] mt-0.5 ${row.champion ? 'text-emerald-600 font-bold' : 'text-slate-400'}">
+                                ${row.champion ? `Campeón detectado: ${escapeTransferText(row.champion.name)}` : 'En curso / sin campeón definido'}
+                            </div>
+                        </div>
+                        <div class="relative">
+                            <input id="${escapeTransferText(row.id)}" type="number" min="0" step="0.1" value="${Number(row.value) || 0}"
+                                class="w-full border border-slate-300 rounded-lg py-2 pl-3 pr-10 text-sm font-bold text-right bg-white">
+                            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] font-black text-slate-400">M€</span>
+                        </div>
+                    </div>`).join('');
+            }
+
+            const transactions = document.getElementById('finance-transactions');
+            if (transactions) {
+                const teamMap = new Map();
+                (rootState.leagues || []).forEach(league => {
+                    (league.teams || []).forEach(team => {
+                        if (!teamMap.has(team.id)) teamMap.set(team.id, team);
+                    });
+                });
+
+                const rows = [...store.transactions]
+                    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0))
+                    .slice(0, 100);
+
+                transactions.innerHTML = rows.length ? rows.map(tx => {
+                    const team = teamMap.get(tx.teamId);
+                    const amount = Number(tx.amount) || 0;
+                    const date = new Date(tx.updatedAt || tx.createdAt);
+                    return `
+                        <div class="finance-transaction-row">
+                            <div class="flex items-center gap-2 min-w-0">
+                                <img src="${escapeTransferText(team?.logo || transferPlaceholder(44, 'E'))}" referrerpolicy="no-referrer" class="w-8 h-8 rounded-full object-contain border bg-white" onerror="this.style.display='none'">
+                                <span class="font-bold text-slate-700 truncate">${escapeTransferText(team?.name || 'Equipo')}</span>
+                            </div>
+                            <div class="finance-tx-description min-w-0">
+                                <div class="font-semibold text-slate-700 truncate">${escapeTransferText(tx.label || 'Movimiento')}</div>
+                                <div class="text-[10px] text-slate-400 truncate">${escapeTransferText(tx.detail || '')}</div>
+                            </div>
+                            <div class="text-right font-black ${amount < 0 ? 'text-red-600' : 'text-emerald-600'}">${formatFinanceAmount(amount, true)}</div>
+                            <div class="text-right text-[10px] text-slate-400">${Number.isFinite(date.getTime()) ? date.toLocaleDateString('es-ES') : ''}</div>
+                        </div>`;
+                }).join('') : `<div class="p-8 text-center text-sm text-slate-400">Todavía no hay movimientos financieros.</div>`;
+            }
+        }
+
+
         // --- MERCADO DE TRASPASOS ---
         const FREE_AGENT_TEAM_ID = '__free_agent__';
         let editingTransferId = null;
@@ -7326,6 +7962,7 @@
                 fromTeamId,
                 toTeamId,
                 fee,
+                financeAmount: Math.max(0, parseFinanceNumber(fee)),
                 announcedAt: Number.isFinite(announcedDate.getTime()) ? announcedDate.toISOString() : new Date().toISOString(),
                 createdAt: existing?.createdAt || new Date().toISOString()
             };
@@ -7338,6 +7975,10 @@
 
             if (existingIndex >= 0) appState.transfers[existingIndex] = transfer;
             else appState.transfers.unshift(transfer);
+
+            // Cobra el fichaje al club comprador. Editar el traspaso ajusta la
+            // transacción existente en vez de volver a cobrarla.
+            syncTransferFinanceImpact(transfer);
 
             await saveToFirestore();
             showToast(
@@ -7388,6 +8029,7 @@
             if (!transfer) return;
             if (!confirm(`¿Eliminar el traspaso de ${transfer.playerName}?`)) return;
             appState.transfers = appState.transfers.filter(t => t.id !== transferId);
+            removeFinanceTransaction(`transfer-buy:${transferId}`);
             if (editingTransferId === transferId) window.clearTransferForm();
             await saveToFirestore();
             renderTransfers();
@@ -8408,6 +9050,13 @@
             if(tabName === 'equipos') {
                 renderTeamsConfig();
             }
+            if(tabName === 'finanzas') {
+                if (!isAdmin) {
+                    switchTab('posiciones');
+                    return;
+                }
+                renderFinances();
+            }
             if(tabName === 'traspasos') {
                 renderTransfers();
             }
@@ -8922,6 +9571,10 @@
                 showToast("Modo espectador: solo el administrador puede guardar cambios.");
                 return false;
             }
+
+            // Antes de guardar, conciliamos premios de competiciones de la temporada activa.
+            // Es idempotente: no duplica pagos y corrige importe/campeón si cambian los resultados.
+            syncAutomaticCompetitionPrizes(appState);
 
             const dataToSave = getPersistableState();
             if (!dataToSave || !db) return false;
@@ -10736,6 +11389,7 @@
             'changeBracketSize', 'editTeamTrophy', 'deleteTeamTrophy', 'editTransfer', 'deleteTransfer',
             'saveAwardsMarketValue', 'deleteAward', 'handleAwardEntryImageFile', 'updateAwardEntryImageUrl',
             'saveEditedPlayer', 'startEditPlayer', 'removePlayer', 'handleTransferPhotoFile',
+            'applyManualFinanceAdjustment', 'saveFinancePrizeSettings',
             'restoreRecoveredLeagueToFirebase',
             'onTransferPlayerChange', 'onTransferImageUrlInput', 'handleAwardTrophyFile',
             'previewAwardTrophy', 'changeTrophy', 'savePendingData', 'importLeagueBackup',
@@ -10776,7 +11430,9 @@
             // volvemos a una sección pública antes de ocultarla.
             if (!isAdmin) {
                 const equiposTab = document.getElementById('tab-equipos');
-                if (equiposTab && equiposTab.classList.contains('active')) {
+                const finanzasTab = document.getElementById('tab-finanzas');
+                if ((equiposTab && equiposTab.classList.contains('active')) ||
+                    (finanzasTab && finanzasTab.classList.contains('active'))) {
                     switchTab('posiciones');
                 }
             }
