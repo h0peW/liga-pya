@@ -7086,6 +7086,89 @@
             match.aScore = String(aI + aV);
         }
 
+        function updateBracketAggregateDisplay(matchId) {
+            const match = appState?.bracket?.[matchId];
+            const card = document.querySelector(`[data-bracket-card="${matchId}"]`);
+            if (!match || !card) return;
+
+            const homeTotal = card.querySelector('[data-bracket-total="home"]');
+            const awayTotal = card.querySelector('[data-bracket-total="away"]');
+
+            if (homeTotal) homeTotal.textContent = match.hScore !== null && match.hScore !== undefined && match.hScore !== '' ? match.hScore : '-';
+            if (awayTotal) awayTotal.textContent = match.aScore !== null && match.aScore !== undefined && match.aScore !== '' ? match.aScore : '-';
+        }
+
+        function updateBracketWinnerClassesInPlace(matchId) {
+            const match = appState?.bracket?.[matchId];
+            const card = document.querySelector(`[data-bracket-card="${matchId}"]`);
+            if (!match || !card) return;
+
+            const rows = card.querySelectorAll('.bracket-match > .bracket-team');
+            if (rows.length < 2) return;
+
+            rows[0].classList.remove('winner');
+            rows[1].classList.remove('winner');
+
+            const hasHome = match.hScore !== null && match.hScore !== undefined && match.hScore !== '';
+            const hasAway = match.aScore !== null && match.aScore !== undefined && match.aScore !== '';
+            if (!hasHome || !hasAway) return;
+
+            const home = parseInt(match.hScore, 10);
+            const away = parseInt(match.aScore, 10);
+            if (!Number.isFinite(home) || !Number.isFinite(away) || home === away) return;
+
+            if (home > away) rows[0].classList.add('winner');
+            else rows[1].classList.add('winner');
+        }
+
+        function getPreliminaryTargetSnapshot(match) {
+            if (!match?.next || !match?.nextPos || !appState?.bracket?.[match.next]) return null;
+            return {
+                nextMatchId: match.next,
+                slot: match.nextPos,
+                value: appState.bracket[match.next][match.nextPos] || null
+            };
+        }
+
+        window.onBracketScoreInput = function(input) {
+            if (!input || !appState?.bracket) return;
+
+            const matchId = input.dataset.bracketId;
+            const type = input.dataset.type;
+            if (!matchId || !type) return;
+
+            const match = appState.bracket[matchId];
+            if (!match) return;
+
+            // El valor se copia al estado EN CADA TECLA, incluida la borrada.
+            // Así no dependemos del blur/change del input.
+            match[type] = input.value === '' ? null : input.value;
+
+            updateSingleBracketAggregate(match);
+
+            // Guardamos cómo estaba el cruce receptor antes de recalcular
+            // la clasificación preliminar.
+            const targetBefore = getPreliminaryTargetSnapshot(match);
+
+            syncPreliminaryWinnerSlots(appState.bracket);
+
+            // Actualización visual local: NO reconstruye la llave que el usuario
+            // está editando, por lo que no puede restaurar otros inputs.
+            updateBracketAggregateDisplay(matchId);
+            updateBracketWinnerClassesInPlace(matchId);
+
+            // Solo reconstruimos el cruce siguiente si realmente cambió
+            // el equipo propagado desde una preliminar.
+            if (targetBefore) {
+                const targetAfter = appState.bracket[targetBefore.nextMatchId]?.[targetBefore.slot] || null;
+                if (targetAfter !== targetBefore.value) {
+                    refreshBracketMatchCard(targetBefore.nextMatchId);
+                }
+            }
+
+            scheduleBracketSave();
+        };
+
         window.onBracketFieldChange = function(input) {
             if (!input || !appState?.bracket) return;
 
@@ -7113,18 +7196,19 @@
                     match[lineupKey] = [];
                     match[formationKey] = '4-3-3';
                 }
+
+                // Cambiar un equipo sí requiere regenerar esa tarjeta porque
+                // cambian escudo, lista de MVP y alineación.
+                const nextMatchId = match.next || null;
+                syncPreliminaryWinnerSlots(appState.bracket);
+                refreshBracketMatchCard(matchId);
+
+                if (nextMatchId && appState.bracket[nextMatchId]) {
+                    refreshBracketMatchCard(nextMatchId);
+                }
             } else {
+                // MVP y otros selects no necesitan reconstruir toda la llave.
                 match[type] = value;
-            }
-
-            updateSingleBracketAggregate(match);
-
-            const nextMatchId = match.next || null;
-            syncPreliminaryWinnerSlots(appState.bracket);
-
-            refreshBracketMatchCard(matchId);
-            if (nextMatchId && appState.bracket[nextMatchId]) {
-                refreshBracketMatchCard(nextMatchId);
             }
 
             scheduleBracketSave();
@@ -7167,10 +7251,10 @@
                     </div>
                     <div class="bracket-match flex flex-col !border-b-0">
                         <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}
-                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreIda" value="${matchData.hScoreIda !== null ? matchData.hScoreIda : ''}" onchange="onBracketFieldChange(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreVuelta" value="${matchData.hScoreVuelta !== null ? matchData.hScoreVuelta : ''}" onchange="onBracketFieldChange(this)"><span class="bracket-score-total">${matchData.hScore !== null ? matchData.hScore : '-'}</span></div>
+                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreIda" value="${matchData.hScoreIda !== null ? matchData.hScoreIda : ''}" oninput="onBracketScoreInput(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="hScoreVuelta" value="${matchData.hScoreVuelta !== null ? matchData.hScoreVuelta : ''}" oninput="onBracketScoreInput(this)"><span class="bracket-score-total" data-bracket-total="home">${matchData.hScore !== null ? matchData.hScore : '-'}</span></div>
                         </div>
                         <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}
-                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreIda" value="${matchData.aScoreIda !== null ? matchData.aScoreIda : ''}" onchange="onBracketFieldChange(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreVuelta" value="${matchData.aScoreVuelta !== null ? matchData.aScoreVuelta : ''}" onchange="onBracketFieldChange(this)"><span class="bracket-score-total">${matchData.aScore !== null ? matchData.aScore : '-'}</span></div>
+                            <div class="ml-auto flex"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreIda" value="${matchData.aScoreIda !== null ? matchData.aScoreIda : ''}" oninput="onBracketScoreInput(this)"><input type="number" class="bracket-score-input two-legged bracket-input" data-bracket-id="${matchData.id}" data-type="aScoreVuelta" value="${matchData.aScoreVuelta !== null ? matchData.aScoreVuelta : ''}" oninput="onBracketScoreInput(this)"><span class="bracket-score-total" data-bracket-total="away">${matchData.aScore !== null ? matchData.aScore : '-'}</span></div>
                         </div>
                         ${mvpSection}
                     </div>
@@ -7179,8 +7263,8 @@
                 return `
                     <div class="flex items-center gap-1 mb-1 ml-1"><div class="text-xs font-bold text-slate-400">${title}</div><button onclick="openLineup('${matchData.id}', true)" class="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded hover:bg-slate-300 transition-colors shadow-sm" title="11 Inicial"><i class="fa-solid fa-chess-board"></i></button></div>
                     <div class="bracket-match flex flex-col !border-b-0">
-                        <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="hScore" value="${matchData.hScore !== null ? matchData.hScore : ''}" onchange="onBracketFieldChange(this)"></div>
-                        <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="aScore" value="${matchData.aScore !== null ? matchData.aScore : ''}" onchange="onBracketFieldChange(this)"></div>
+                        <div class="bracket-team ${homeWinnerClass}">${homeTeam ? `<img src="${homeTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${homeSelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="hScore" value="${matchData.hScore !== null ? matchData.hScore : ''}" oninput="onBracketScoreInput(this)"></div>
+                        <div class="bracket-team ${awayWinnerClass}">${awayTeam ? `<img src="${awayTeam.logo}" class="w-5 h-5 rounded-full mr-2 object-contain bg-white">` : '<div class="w-5 h-5 rounded-full mr-2 bg-slate-200"></div>'}${awaySelect}<input type="number" class="bracket-score-input bracket-input" data-bracket-id="${matchData.id}" data-type="aScore" value="${matchData.aScore !== null ? matchData.aScore : ''}" oninput="onBracketScoreInput(this)"></div>
                         ${mvpSection}
                     </div>
                 `;
