@@ -7134,11 +7134,13 @@
             fromSelect.innerHTML = `<option value="">Seleccionar equipo</option><option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` + (appState.teams || []).map(team =>
                 `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
             ).join('');
-            toSelect.innerHTML = teamOptions;
+            toSelect.innerHTML = `<option value="">Seleccionar equipo</option><option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` + (appState.teams || []).map(team =>
+                `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
+            ).join('');
 
             if (players.some(p => p.id === previousPlayer)) playerSelect.value = previousPlayer;
             if (previousFrom === FREE_AGENT_TEAM_ID || (appState.teams || []).some(t => t.id === previousFrom)) fromSelect.value = previousFrom;
-            if ((appState.teams || []).some(t => t.id === previousTo)) toSelect.value = previousTo;
+            if (previousTo === FREE_AGENT_TEAM_ID || (appState.teams || []).some(t => t.id === previousTo)) toSelect.value = previousTo;
         }
 
         window.onTransferImageUrlInput = function(value) {
@@ -7236,13 +7238,18 @@
         };
 
         function syncPlayerRosterFromTransfer(transfer) {
-            if (!transfer?.toTeamId) return { moved: false, player: null };
+            if (!transfer?.toTeamId) return { moved: false, player: null, freeAgent: false };
 
-            const destinationTeam = (appState.teams || []).find(team => team.id === transfer.toTeamId);
-            if (!destinationTeam) return { moved: false, player: null };
-            if (!Array.isArray(destinationTeam.players)) destinationTeam.players = [];
+            const goesToFreeAgent = transfer.toTeamId === FREE_AGENT_TEAM_ID;
+            const destinationTeam = goesToFreeAgent
+                ? null
+                : (appState.teams || []).find(team => team.id === transfer.toTeamId);
 
-            // Si el traspaso es de un jugador ya existente, conserva su dorsal, foto e ID.
+            if (!goesToFreeAgent && !destinationTeam) {
+                return { moved: false, player: null, freeAgent: false };
+            }
+            if (destinationTeam && !Array.isArray(destinationTeam.players)) destinationTeam.players = [];
+
             let rosterPlayer = null;
             if (transfer.playerId) {
                 for (const team of (appState.teams || [])) {
@@ -7254,7 +7261,6 @@
                 }
             }
 
-            // Para un jugador personalizado / agente libre, crea una ficha nueva en la plantilla destino.
             if (!rosterPlayer) {
                 const generatedId = transfer.playerId || `p_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
                 transfer.playerId = generatedId;
@@ -7264,22 +7270,23 @@
                     num: '',
                     img: transfer.playerImg || ''
                 };
-            } else {
-                // El "Nombre mostrado" no borra el dorsal ni otros datos del jugador existente.
-                // Solo usamos la foto anunciada si se indicó una nueva.
-                if (transfer.playerImg) rosterPlayer.img = transfer.playerImg;
+            } else if (transfer.playerImg) {
+                rosterPlayer.img = transfer.playerImg;
             }
 
-            // Garantiza que el registro de transferencia quede vinculado a la ficha real.
             transfer.playerId = rosterPlayer.id;
 
-            // Un jugador solo puede pertenecer a un equipo actual: lo retiramos de cualquier
-            // plantilla anterior y luego lo insertamos/actualizamos en el club de destino.
+            // Primero se retira al jugador de cualquier plantilla actual.
             (appState.teams || []).forEach(team => {
                 if (!Array.isArray(team.players)) team.players = [];
-                if (team.id === destinationTeam.id) return;
+                if (!goesToFreeAgent && team.id === destinationTeam.id) return;
                 team.players = team.players.filter(player => player.id !== rosterPlayer.id);
             });
+
+            // Si el destino es AGENTE LIBRE, no se añade a ningún club.
+            if (goesToFreeAgent) {
+                return { moved: true, player: rosterPlayer, freeAgent: true };
+            }
 
             const existingDestinationIndex = destinationTeam.players.findIndex(player => player.id === rosterPlayer.id);
             if (existingDestinationIndex >= 0) {
@@ -7291,7 +7298,7 @@
                 destinationTeam.players.push(rosterPlayer);
             }
 
-            return { moved: true, player: rosterPlayer };
+            return { moved: true, player: rosterPlayer, freeAgent: false };
         }
 
         window.saveTransfer = async function() {
@@ -7335,7 +7342,11 @@
             await saveToFirestore();
             showToast(
                 rosterSync.moved
-                    ? (existingIndex >= 0 ? 'Traspaso actualizado y plantilla sincronizada' : 'Traspaso añadido y jugador movido al nuevo equipo')
+                    ? (
+                        rosterSync.freeAgent
+                            ? (existingIndex >= 0 ? 'Traspaso actualizado: jugador quedó como agente libre' : 'Traspaso añadido: jugador quedó como agente libre')
+                            : (existingIndex >= 0 ? 'Traspaso actualizado y plantilla sincronizada' : 'Traspaso añadido y jugador movido al nuevo equipo')
+                    )
                     : (existingIndex >= 0 ? 'Traspaso actualizado' : 'Traspaso añadido')
             );
             window.clearTransferForm();
@@ -7400,7 +7411,9 @@
                 const fromTeam = transfer.fromTeamId === FREE_AGENT_TEAM_ID
                     ? { name: 'AGENTE LIBRE', logo: transferPlaceholder(64, 'AL') }
                     : ((appState.teams || []).find(t => t.id === transfer.fromTeamId) || { name: 'Origen', logo: '' });
-                const toTeam = (appState.teams || []).find(t => t.id === transfer.toTeamId) || { name: 'Destino', logo: '' };
+                const toTeam = transfer.toTeamId === FREE_AGENT_TEAM_ID
+                    ? { name: 'AGENTE LIBRE', logo: transferPlaceholder(64, 'AL') }
+                    : ((appState.teams || []).find(t => t.id === transfer.toTeamId) || { name: 'Destino', logo: '' });
                 const playerName = transfer.playerName || 'Jugador';
                 const playerImg = transfer.playerImg || transferPlaceholder(100, playerName.slice(0, 2).toUpperCase());
                 const fromLogo = fromTeam.logo || transferPlaceholder(64, fromTeam.name.slice(0, 2).toUpperCase());
