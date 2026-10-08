@@ -2506,7 +2506,10 @@
             <div id="tab-estadisticas" class="tab-content">
                 <div class="glass-panel p-5 md:p-6">
                     <div class="flex flex-col sm:flex-row justify-between sm:items-center gap-3 mb-6">
-                        <h2 class="text-xl font-bold text-slate-700">Estadísticas de Jugadores</h2>
+                        <div>
+                            <h2 class="text-xl font-bold text-slate-700">Estadísticas de Jugadores</h2>
+                            <p id="stats-competition-label" class="text-xs text-slate-500 mt-1">Fase Regular (Liga)</p>
+                        </div>
                         <div class="flex flex-wrap items-center gap-2">
                             <button onclick="openBackgroundManager('estadisticas')" class="background-btn font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm" title="Cambiar fondo de Estadísticas">
                                 <i class="fa-solid fa-image"></i> Fondo
@@ -2516,7 +2519,6 @@
                             </button>
                             <select id="stats-phase-select" onchange="renderStats()" class="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 p-2.5 font-semibold">
                                 <option value="liga">Fase Regular (Liga)</option>
-                                <option value="eliminatoria">Champions League (Eliminatorias)</option>
                             </select>
                         </div>
                     </div>
@@ -9631,6 +9633,60 @@
         }
 
         // --- SISTEMA DE ESTADÍSTICAS ---
+        function getStatsPhaseBracketEdition(phase) {
+            if (!phase || phase === 'liga') return null;
+
+            if (phase.startsWith('elim:')) {
+                const editionId = phase.slice(5);
+                return (appState.bracketEditions || []).find(edition => edition.id === editionId) || null;
+            }
+
+            if (phase === 'eliminatoria') {
+                return (appState.bracketEditions || []).find(edition => edition.id === appState.activeBracketId)
+                    || (appState.bracketEditions || [])[0]
+                    || null;
+            }
+
+            return null;
+        }
+
+        function renderStatsPhaseOptions() {
+            const select = document.getElementById('stats-phase-select');
+            if (!select || !appState) return 'liga';
+
+            const previousValue = select.value || 'liga';
+            const editions = [...(appState.bracketEditions || [])]
+                .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+
+            const signature = JSON.stringify(editions.map(edition => [edition.id, edition.name]));
+
+            if (select.dataset.eliminationsSignature !== signature) {
+                select.innerHTML = `
+                    <option value="liga">Fase Regular (Liga)</option>
+                    ${editions.map(edition =>
+                        `<option value="elim:${edition.id}">${escapeTransferText(edition.name || 'Eliminatoria')} (Eliminatorias)</option>`
+                    ).join('')}
+                `;
+                select.dataset.eliminationsSignature = signature;
+            }
+
+            const validValues = new Set([...select.options].map(option => option.value));
+
+            if (validValues.has(previousValue)) {
+                select.value = previousValue;
+            } else if (
+                previousValue === 'eliminatoria' &&
+                appState.activeBracketId &&
+                validValues.has(`elim:${appState.activeBracketId}`)
+            ) {
+                select.value = `elim:${appState.activeBracketId}`;
+            } else {
+                select.value = 'liga';
+            }
+
+            return select.value;
+        }
+
         function calculatePlayerStats(phase) {
             const stats = {};
             
@@ -9674,21 +9730,24 @@
                         if (mvpId && stats[mvpId]) stats[mvpId].mvpMatchday += 1;
                     });
                 }
-            } else if (phase === 'eliminatoria') {
-                if(appState.bracket) {
-                    Object.values(appState.bracket).forEach(m => { 
+            } else {
+                const edition = getStatsPhaseBracketEdition(phase);
+                const selectedBracket = edition?.data || null;
+
+                if (selectedBracket) {
+                    Object.values(selectedBracket).forEach(m => {
                         if (m && typeof m === 'object' && m.id) {
-                            processLineup(m.lineupHome); 
+                            processLineup(m.lineupHome);
                             processLineup(m.lineupAway);
-                            // Validar MVP por llave o final
+
                             if (m.mvpIda && stats[m.mvpIda]) stats[m.mvpIda].mvpMatch += 1;
                             if (m.mvpVuelta && stats[m.mvpVuelta]) stats[m.mvpVuelta].mvpMatch += 1;
                             if (m.mvp && stats[m.mvp]) stats[m.mvp].mvpMatch += 1;
                         }
                     });
-                    // Validar MVP del Torneo general
-                    if (appState.bracket.tournamentMvp && stats[appState.bracket.tournamentMvp]) {
-                        stats[appState.bracket.tournamentMvp].mvpMatchday += 1;
+
+                    if (selectedBracket.tournamentMvp && stats[selectedBracket.tournamentMvp]) {
+                        stats[selectedBracket.tournamentMvp].mvpMatchday += 1;
                     }
                 }
             }
@@ -9711,8 +9770,20 @@
         }
 
         window.renderStats = function() {
-            const phase = document.getElementById('stats-phase-select').value;
-            
+            const phase = renderStatsPhaseOptions();
+
+            const competitionLabel = document.getElementById('stats-competition-label');
+            if (competitionLabel) {
+                if (phase === 'liga') {
+                    competitionLabel.textContent = 'Fase Regular (Liga)';
+                } else {
+                    const edition = getStatsPhaseBracketEdition(phase);
+                    competitionLabel.textContent = edition
+                        ? `${edition.name} · estadísticas independientes`
+                        : 'Eliminatoria';
+                }
+            }
+
             // Mostrar u Ocultar el contenedor del gráfico de evolución dependiendo de la fase
             const chartContainer = document.getElementById('evolution-chart-container');
             if (chartContainer) {
@@ -9722,8 +9793,9 @@
             // Cambiar dinámicamente el título del contenedor de MVP (Fecha vs Torneo)
             const mvpMatchdayTitle = document.getElementById('mvp-matchday-title');
             if (mvpMatchdayTitle) {
-                if (phase === 'eliminatoria') {
-                    mvpMatchdayTitle.innerHTML = '<i class="fa-solid fa-trophy"></i> MVP del Torneo';
+                if (phase !== 'liga') {
+                    const edition = getStatsPhaseBracketEdition(phase);
+                    mvpMatchdayTitle.innerHTML = `<i class="fa-solid fa-trophy"></i> MVP del Torneo${edition?.name ? ` · ${escapeTransferText(edition.name)}` : ''}`;
                 } else {
                     mvpMatchdayTitle.innerHTML = '<i class="fa-solid fa-trophy"></i> MVP de la Fecha';
                 }
