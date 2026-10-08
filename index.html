@@ -5908,27 +5908,58 @@
                 .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.id).localeCompare(String(b.id)));
         }
 
-        function getClubEliminationTeamMatches(teamId) {
+        function clubTeamParticipatedInBracket(teamId, bracket) {
+            if (!teamId || !bracket) return false;
+            return getBracketMatchEntries(bracket).some(({match}) =>
+                match && (match.home === teamId || match.away === teamId)
+            );
+        }
+
+        function getClubPlayedEliminationEditions(teamId) {
+            return [...(appState.bracketEditions || [])]
+                .filter(edition => clubTeamParticipatedInBracket(teamId, edition?.data))
+                .sort((a, b) => new Date(a.createdAt || 0) - new Date(b.createdAt || 0));
+        }
+
+        function getClubEliminationTeamMatches(teamId, editionOrId = null) {
             const matches = [];
-            if (!appState.bracket) return matches;
-            const competitionLabel = getActiveEliminationEdition()?.name || 'Champions League';
-            getBracketMatchEntries(appState.bracket).forEach(({key, match, title, order, isTwoLegged}) => {
+
+            let edition = null;
+            if (editionOrId && typeof editionOrId === 'object') {
+                edition = editionOrId;
+            } else if (editionOrId) {
+                edition = (appState.bracketEditions || []).find(item => item.id === editionOrId) || null;
+            } else {
+                edition = getActiveEliminationEdition();
+            }
+
+            const bracket = edition?.data || null;
+            if (!bracket) return matches;
+
+            const competitionLabel = edition?.name || 'Eliminatoria';
+            const editionIndex = Math.max(
+                0,
+                (appState.bracketEditions || []).findIndex(item => item.id === edition?.id)
+            );
+
+            getBracketMatchEntries(bracket).forEach(({key, match, title, order, isTwoLegged}) => {
                 if (!match || !match.home || !match.away) return;
                 if (match.home !== teamId && match.away !== teamId) return;
 
                 const pushLeg = (suffix, homeGoals, awayGoals, legIndex, mvpValue) => {
                     matches.push({
-                        id: `${key}-${suffix || 'single'}`,
+                        id: `${edition?.id || 'elim'}-${key}-${suffix || 'single'}`,
                         homeId: match.home,
                         awayId: match.away,
                         homeGoals,
                         awayGoals,
                         lineupHome: Array.isArray(match.lineupHome) ? match.lineupHome : [],
                         lineupAway: Array.isArray(match.lineupAway) ? match.lineupAway : [],
-                        phase: 'eliminatoria',
+                        phase: `elim:${edition?.id || ''}`,
+                        editionId: edition?.id || null,
                         competitionLabel,
                         displayLabel: suffix ? `${title} · ${suffix}` : title,
-                        sortOrder: 1000 + order * 10 + legIndex,
+                        sortOrder: 1000 + editionIndex * 1000 + order * 10 + legIndex,
                         mvp: mvpValue || null
                     });
                 };
@@ -5940,14 +5971,58 @@
                     pushLeg('', match.hScore ?? null, match.aScore ?? null, 1, match.mvp);
                 }
             });
+
             return matches.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0));
+        }
+
+        function getClubPhaseEdition(phase = clubPhaseFilter) {
+            if (!phase || !String(phase).startsWith('elim:')) return null;
+            const editionId = String(phase).slice(5);
+            return (appState.bracketEditions || []).find(edition => edition.id === editionId) || null;
+        }
+
+        function getClubAvailablePhaseOptions(teamId) {
+            const options = [{ value: 'todos', label: 'Todas las fases' }];
+
+            // Liga aparece solo si el equipo tiene/tuvo partidos de la fase regular
+            // en la división que está vinculada actualmente.
+            const leagueMatches = getClubLeagueTeamMatches(teamId);
+            if (leagueMatches.length > 0) {
+                options.push({ value: 'liga', label: 'Fase Regular (Liga)' });
+            }
+
+            getClubPlayedEliminationEditions(teamId).forEach(edition => {
+                options.push({
+                    value: `elim:${edition.id}`,
+                    label: `${edition.name || 'Eliminatoria'} (Eliminatorias)`
+                });
+            });
+
+            return options;
         }
 
         function getClubTeamMatches(teamId, phase = clubPhaseFilter) {
             const list = [];
-            if (phase === 'todos' || phase === 'liga') list.push(...getClubLeagueTeamMatches(teamId));
-            if (phase === 'todos' || phase === 'eliminatoria') list.push(...getClubEliminationTeamMatches(teamId));
-            return list.sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0) || String(a.id).localeCompare(String(b.id)));
+
+            if (phase === 'todos') {
+                list.push(...getClubLeagueTeamMatches(teamId));
+                getClubPlayedEliminationEditions(teamId).forEach(edition => {
+                    list.push(...getClubEliminationTeamMatches(teamId, edition));
+                });
+            } else if (phase === 'liga') {
+                list.push(...getClubLeagueTeamMatches(teamId));
+            } else if (String(phase).startsWith('elim:')) {
+                list.push(...getClubEliminationTeamMatches(teamId, String(phase).slice(5)));
+            } else if (phase === 'eliminatoria') {
+                // Compatibilidad con versiones antiguas.
+                const activeEdition = getActiveEliminationEdition();
+                if (activeEdition) list.push(...getClubEliminationTeamMatches(teamId, activeEdition));
+            }
+
+            return list.sort((a, b) =>
+                (a.sortOrder || 0) - (b.sortOrder || 0) ||
+                String(a.id).localeCompare(String(b.id))
+            );
         }
 
         function calculateClubRecordFromMatches(teamId, matches) {
@@ -5976,13 +6051,27 @@
 
         function getClubPhaseLabel(phase = clubPhaseFilter) {
             if (phase === 'liga') return 'Fase Regular (Liga)';
-            if (phase === 'eliminatoria') return `${getActiveEliminationEdition()?.name || 'Champions League'} (Eliminatorias)`;
+
+            const edition = getClubPhaseEdition(phase);
+            if (edition) return `${edition.name || 'Eliminatoria'} (Eliminatorias)`;
+
+            if (phase === 'eliminatoria') {
+                return `${getActiveEliminationEdition()?.name || 'Eliminatoria'} (Eliminatorias)`;
+            }
+
             return 'Todas las fases';
         }
 
         function getClubPhaseShortLabel(phase = clubPhaseFilter) {
             if (phase === 'liga') return 'Liga';
-            if (phase === 'eliminatoria') return getActiveEliminationEdition()?.name || 'Champions League';
+
+            const edition = getClubPhaseEdition(phase);
+            if (edition) return edition.name || 'Eliminatoria';
+
+            if (phase === 'eliminatoria') {
+                return getActiveEliminationEdition()?.name || 'Eliminatoria';
+            }
+
             return 'Todas las fases';
         }
 
@@ -6047,11 +6136,16 @@
                 });
             }
 
-            if ((phase === 'todos' || phase === 'eliminatoria') && appState.bracket) {
-                getBracketMatchEntries(appState.bracket).forEach(({match, isTwoLegged}) => {
+            const processEditionStats = (edition) => {
+                const bracket = edition?.data;
+                if (!bracket || !clubTeamParticipatedInBracket(teamId, bracket)) return;
+
+                getBracketMatchEntries(bracket).forEach(({match, isTwoLegged}) => {
                     if (!match || (match.home !== teamId && match.away !== teamId)) return;
+
                     if (match.home === teamId) processLineup(match.lineupHome);
                     if (match.away === teamId) processLineup(match.lineupAway);
+
                     if (isTwoLegged) {
                         if (match.mvpIda && stats[match.mvpIda]) stats[match.mvpIda].mvpMatch += 1;
                         if (match.mvpVuelta && stats[match.mvpVuelta]) stats[match.mvpVuelta].mvpMatch += 1;
@@ -6059,9 +6153,19 @@
                         stats[match.mvp].mvpMatch += 1;
                     }
                 });
-                if (appState.bracket.tournamentMvp && stats[appState.bracket.tournamentMvp]) {
-                    stats[appState.bracket.tournamentMvp].mvpMatchday += 1;
+
+                if (bracket.tournamentMvp && stats[bracket.tournamentMvp]) {
+                    stats[bracket.tournamentMvp].mvpMatchday += 1;
                 }
+            };
+
+            if (phase === 'todos') {
+                getClubPlayedEliminationEditions(teamId).forEach(processEditionStats);
+            } else if (String(phase).startsWith('elim:')) {
+                processEditionStats(getClubPhaseEdition(phase));
+            } else if (phase === 'eliminatoria') {
+                // Compatibilidad con datos/estado antiguo.
+                processEditionStats(getActiveEliminationEdition());
             }
 
             return Object.values(stats).map(player => ({
@@ -6343,6 +6447,14 @@
         window.changeClubTeam = function(teamId) {
             selectedClubTeamId = teamId || null;
             clubSubtab = 'resumen';
+
+            const validPhases = new Set(
+                getClubAvailablePhaseOptions(selectedClubTeamId).map(option => option.value)
+            );
+            if (!validPhases.has(clubPhaseFilter)) {
+                clubPhaseFilter = 'todos';
+            }
+
             clubMusicUserPaused = false;
             clubMusicAudio.muted = false;
             renderClubPage();
@@ -6356,7 +6468,17 @@
         };
 
         window.switchClubPhase = function(phase) {
-            if (!['todos', 'liga', 'eliminatoria'].includes(phase)) return;
+            const validOptions = new Set(
+                getClubAvailablePhaseOptions(selectedClubTeamId).map(option => option.value)
+            );
+
+            // Compatibilidad con la opción antigua.
+            if (phase === 'eliminatoria') {
+                const activeEdition = getActiveEliminationEdition();
+                phase = activeEdition ? `elim:${activeEdition.id}` : 'todos';
+            }
+
+            if (!validOptions.has(phase)) return;
             clubPhaseFilter = phase;
             renderClubPage();
         };
@@ -6394,6 +6516,20 @@
             teamSelect.innerHTML = appState.teams.map(team => `<option value="${team.id}" ${team.id === selectedClubTeamId ? 'selected' : ''}>${team.name}</option>`).join('');
 
             const team = appState.teams.find(t => t.id === selectedClubTeamId) || appState.teams[0];
+
+            const clubPhaseOptions = getClubAvailablePhaseOptions(team.id);
+            const validClubPhases = new Set(clubPhaseOptions.map(option => option.value));
+
+            // Si al cambiar de equipo/temporada la competición seleccionada ya no
+            // corresponde a ese club, volvemos a "Todas las fases".
+            if (clubPhaseFilter === 'eliminatoria') {
+                const activeEdition = getActiveEliminationEdition();
+                clubPhaseFilter = activeEdition ? `elim:${activeEdition.id}` : 'todos';
+            }
+            if (!validClubPhases.has(clubPhaseFilter)) {
+                clubPhaseFilter = 'todos';
+            }
+
             const standings = calculateStandings();
             const leagueStandingIndex = standings.findIndex(t => t.id === team.id);
             const leagueStanding = leagueStandingIndex >= 0 ? standings[leagueStandingIndex] : { pj: 0, g: 0, e: 0, p: 0, gf: 0, gc: 0, dg: 0, pts: 0 };
@@ -6429,7 +6565,7 @@
                         <div class="flex items-center gap-4 min-w-0">
                             <img src="${team.logo}" class="club-team-crest" alt="${team.name}" onerror="this.src='https://placehold.co/92x92/ffffff/64748b?text=?'">
                             <div class="min-w-0">
-                                <div class="flex items-center flex-wrap gap-2 mb-1"><h3 class="text-2xl md:text-3xl font-black truncate">${team.name}</h3>${clubPhaseFilter === 'eliminatoria' ? `<span class="text-[10px] font-black uppercase tracking-wider bg-violet-500/20 text-violet-200 border border-violet-400/30 px-2 py-1 rounded-full">${phaseShort}</span>` : (leagueStandingIndex >= 0 ? `<span class="text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 px-2 py-1 rounded-full">${leagueStandingIndex + 1}.º en Liga</span>` : '')}</div>
+                                <div class="flex items-center flex-wrap gap-2 mb-1"><h3 class="text-2xl md:text-3xl font-black truncate">${team.name}</h3>${String(clubPhaseFilter).startsWith('elim:') ? `<span class="text-[10px] font-black uppercase tracking-wider bg-violet-500/20 text-violet-200 border border-violet-400/30 px-2 py-1 rounded-full">${phaseShort}</span>` : (leagueStandingIndex >= 0 ? `<span class="text-[10px] font-black uppercase tracking-wider bg-indigo-500/20 text-indigo-200 border border-indigo-400/30 px-2 py-1 rounded-full">${leagueStandingIndex + 1}.º en Liga</span>` : '')}</div>
                                 <div class="text-xs text-slate-400 flex flex-wrap gap-x-4 gap-y-1"><span><i class="fa-solid fa-calendar-days mr-1 text-amber-400"></i>${appState.name}</span><span><i class="fa-solid fa-users mr-1 text-slate-300"></i>${(team.players || []).length} jugadores</span><span><i class="fa-solid fa-futbol mr-1 text-emerald-400"></i>${standing.gf} goles</span><span><i class="fa-solid fa-trophy mr-1 text-amber-400"></i>${getTeamTrophies(team).length} copas</span><span><i class="fa-solid fa-layer-group mr-1 text-sky-400"></i>${phaseTitle}</span></div>
                             </div>
                         </div>
@@ -6447,7 +6583,7 @@
                     <div class="club-metric"><div class="club-metric-label">Dif. goles</div><div class="club-metric-value">${standing.dg > 0 ? '+' + standing.dg : standing.dg}</div></div>
                     <div class="club-metric"><div class="club-metric-label">Puntos</div><div class="club-metric-value text-indigo-300">${standing.pts}</div></div>
                 </div>
-                <div class="club-subnav-wrap"><div class="club-subnav">${nav.map(([key, icon, label]) => `<button type="button" onclick="switchClubSubtab('${key}')" class="club-subtab-btn ${clubSubtab === key ? 'active' : ''}"><i class="fa-solid ${icon} mr-1.5"></i>${label}</button>`).join('')}</div><div class="club-phase-toolbar"><label for="club-phase-select"><i class="fa-solid fa-filter mr-1"></i>Ver</label><select id="club-phase-select" onchange="switchClubPhase(this.value)" class="club-phase-select"><option value="todos" ${clubPhaseFilter === 'todos' ? 'selected' : ''}>Todas las fases</option><option value="liga" ${clubPhaseFilter === 'liga' ? 'selected' : ''}>Fase Regular (Liga)</option><option value="eliminatoria" ${clubPhaseFilter === 'eliminatoria' ? 'selected' : ''}>${getActiveEliminationEdition()?.name || 'Champions League'} (Eliminatorias)</option></select></div></div>
+                <div class="club-subnav-wrap"><div class="club-subnav">${nav.map(([key, icon, label]) => `<button type="button" onclick="switchClubSubtab('${key}')" class="club-subtab-btn ${clubSubtab === key ? 'active' : ''}"><i class="fa-solid ${icon} mr-1.5"></i>${label}</button>`).join('')}</div><div class="club-phase-toolbar"><label for="club-phase-select"><i class="fa-solid fa-filter mr-1"></i>Ver</label><select id="club-phase-select" onchange="switchClubPhase(this.value)" class="club-phase-select">${clubPhaseOptions.map(option => `<option value="${escapeTransferText(option.value)}" ${clubPhaseFilter === option.value ? 'selected' : ''}>${escapeTransferText(option.label)}</option>`).join('')}</select></div></div>
                 <div class="club-page-body">${bodyHtml}</div>
             </div>`;
 
