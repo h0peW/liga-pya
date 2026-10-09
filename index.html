@@ -7387,6 +7387,89 @@
             </div>`;
         }
 
+        window.changeClubTeam = function(teamId) {
+            if (!appState || !Array.isArray(appState.teams)) return;
+
+            const requestedTeam = appState.teams.find(team => team.id === teamId);
+            if (!requestedTeam) {
+                // Si el selector entrega un valor inválido, restaurar el equipo actual
+                // sin romper la página.
+                renderClubPage();
+                return;
+            }
+
+            selectedClubTeamId = requestedTeam.id;
+            clubSubtab = 'resumen';
+
+            // Cada club puede haber jugado competiciones distintas.
+            // Si el filtro actual no existe para el nuevo equipo, volver a Todas.
+            const validPhases = new Set(
+                getClubAvailablePhaseOptions(selectedClubTeamId).map(option => option.value)
+            );
+            if (!validPhases.has(clubPhaseFilter)) {
+                clubPhaseFilter = 'todos';
+            }
+
+            // Cambiar de club también cambia su música, pero no toca Firebase
+            // ni vuelve a renderizar toda la aplicación.
+            clubMusicUserPaused = false;
+            clubMusicAudio.muted = false;
+
+            renderClubPage();
+            syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
+        };
+
+        window.switchClubSubtab = function(tabName) {
+            if (!['resumen', 'partidos', 'jugadores', 'estadisticas', 'transferencias', 'copas'].includes(tabName)) return;
+            clubSubtab = tabName;
+            renderClubPage();
+        };
+
+        window.switchClubPhase = function(phase) {
+            if (!selectedClubTeamId) return;
+
+            const validOptions = new Set(
+                getClubAvailablePhaseOptions(selectedClubTeamId).map(option => option.value)
+            );
+
+            // Compatibilidad con estados guardados de versiones antiguas.
+            if (phase === 'eliminatoria') {
+                const activeEdition = getActiveEliminationEdition();
+                phase = activeEdition ? `elim:${activeEdition.id}` : 'todos';
+            }
+
+            if (!validOptions.has(phase)) {
+                phase = 'todos';
+            }
+
+            clubPhaseFilter = phase;
+            renderClubPage();
+        };
+
+        window.openClubPage = function(teamId) {
+            if (teamId && appState?.teams?.some(team => team.id === teamId)) {
+                selectedClubTeamId = teamId;
+            } else if (!selectedClubTeamId || !appState?.teams?.some(team => team.id === selectedClubTeamId)) {
+                selectedClubTeamId = appState?.teams?.[0]?.id || null;
+            }
+
+            clubSubtab = 'resumen';
+
+            const validPhases = new Set(
+                getClubAvailablePhaseOptions(selectedClubTeamId).map(option => option.value)
+            );
+            if (!validPhases.has(clubPhaseFilter)) {
+                clubPhaseFilter = 'todos';
+            }
+
+            clubMusicUserPaused = false;
+            clubMusicAudio.muted = false;
+
+            switchTab('club');
+            renderClubPage();
+            syncClubMusicForSelectedTeam({ autoplay: true, restart: true });
+        };
+
         function renderClubPage() {
             const root = document.getElementById('club-page-root');
             const teamSelect = document.getElementById('club-team-select');
