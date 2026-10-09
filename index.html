@@ -2277,6 +2277,15 @@
             }
         }
 
+    
+        html.dark #transfer-editor > div > div:last-child > .md\:col-span-2.bg-white {
+            background: #0f172a !important;
+            border-color: #334155 !important;
+        }
+        html.dark #transfer-player-filter-count {
+            color: #34d399 !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2931,6 +2940,31 @@
                             </div>
 
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1">
+                                <div class="md:col-span-2 bg-white border border-slate-200 rounded-xl p-3">
+                                    <div class="flex flex-col sm:flex-row sm:items-end gap-3">
+                                        <div class="flex-1">
+                                            <label class="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Filtrar jugadores por equipo actual</label>
+                                            <select id="transfer-player-team-filter" onchange="filterTransferPlayers()" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500">
+                                                <option value="all">Todos los equipos</option>
+                                            </select>
+                                        </div>
+                                        <div class="flex-1">
+                                            <label class="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1">Buscar jugador</label>
+                                            <div class="relative">
+                                                <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
+                                                <input id="transfer-player-search" type="search" placeholder="Ej. Ronaldo, Haaland..." oninput="filterTransferPlayers()" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg py-2.5 pl-9 pr-3 focus:ring-emerald-500 focus:border-emerald-500">
+                                            </div>
+                                        </div>
+                                        <button type="button" onclick="clearTransferPlayerFilters()" class="sm:mb-[1px] bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-300 px-3 py-2.5 rounded-lg text-xs font-bold whitespace-nowrap transition-colors">
+                                            <i class="fa-solid fa-filter-circle-xmark mr-1"></i> Limpiar
+                                        </button>
+                                    </div>
+                                    <div class="mt-2 flex items-center justify-between gap-2">
+                                        <span class="text-[10px] text-slate-400">El filtro solo organiza la selección; no modifica las plantillas.</span>
+                                        <span id="transfer-player-filter-count" class="text-[10px] font-black text-emerald-600 whitespace-nowrap">0 jugadores</span>
+                                    </div>
+                                </div>
+
                                 <div>
                                     <label class="block text-xs font-bold uppercase tracking-wide text-slate-500 mb-1">Jugador de la plantilla</label>
                                     <select id="transfer-player-select" onchange="onTransferPlayerChange(this.value)" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg p-2.5 focus:ring-emerald-500 focus:border-emerald-500"></select>
@@ -8986,6 +9020,118 @@
             return [...playersById.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
         }
 
+        function normalizeTransferFilterText(value = '') {
+            return String(value || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .toLowerCase()
+                .trim();
+        }
+
+        function getTransferPlayerTeamFilterOptions() {
+            return [
+                { id: 'all', name: 'Todos los equipos' },
+                { id: FREE_AGENT_TEAM_ID, name: 'AGENTE LIBRE' },
+                ...(appState?.teams || [])
+                    .map(team => ({ id: team.id, name: team.name || 'Equipo' }))
+                    .sort((a, b) => a.name.localeCompare(b.name, 'es'))
+            ];
+        }
+
+        function populateTransferPlayerTeamFilter() {
+            const filter = document.getElementById('transfer-player-team-filter');
+            if (!filter) return;
+
+            const previous = filter.value || 'all';
+            const options = getTransferPlayerTeamFilterOptions();
+            const signature = JSON.stringify(options.map(option => [option.id, option.name]));
+
+            if (filter.dataset.optionsSignature !== signature) {
+                filter.innerHTML = options.map(option =>
+                    `<option value="${escapeTransferText(option.id)}">${escapeTransferText(option.name)}</option>`
+                ).join('');
+                filter.dataset.optionsSignature = signature;
+            }
+
+            filter.value = options.some(option => option.id === previous) ? previous : 'all';
+        }
+
+        function getFilteredTransferPlayers() {
+            const teamFilter = document.getElementById('transfer-player-team-filter')?.value || 'all';
+            const query = normalizeTransferFilterText(
+                document.getElementById('transfer-player-search')?.value || ''
+            );
+
+            return getAllTransferPlayers().filter(player => {
+                const matchesTeam = teamFilter === 'all' || player.teamId === teamFilter;
+                if (!matchesTeam) return false;
+
+                if (!query) return true;
+
+                const haystack = normalizeTransferFilterText(
+                    `${player.name || ''} ${player.teamName || ''}`
+                );
+                return haystack.includes(query);
+            });
+        }
+
+        function refreshTransferPlayerSelect({ preserveSelection = true, forcePlayerId = '' } = {}) {
+            const playerSelect = document.getElementById('transfer-player-select');
+            if (!playerSelect) return;
+
+            const current = forcePlayerId || (preserveSelection ? playerSelect.value : '');
+            const players = getFilteredTransferPlayers();
+
+            playerSelect.innerHTML = `<option value="">Jugador personalizado</option>` + players.map(player =>
+                `<option value="${escapeTransferText(player.id)}">${escapeTransferText(player.name)} · ${escapeTransferText(player.teamName)}</option>`
+            ).join('');
+
+            if (current && players.some(player => player.id === current)) {
+                playerSelect.value = current;
+            } else {
+                playerSelect.value = '';
+            }
+
+            const count = document.getElementById('transfer-player-filter-count');
+            if (count) {
+                count.textContent = `${players.length} ${players.length === 1 ? 'jugador' : 'jugadores'}`;
+            }
+        }
+
+        window.filterTransferPlayers = function() {
+            refreshTransferPlayerSelect({ preserveSelection: true });
+        };
+
+        window.clearTransferPlayerFilters = function() {
+            const teamFilter = document.getElementById('transfer-player-team-filter');
+            const search = document.getElementById('transfer-player-search');
+
+            if (teamFilter) teamFilter.value = 'all';
+            if (search) search.value = '';
+
+            refreshTransferPlayerSelect({ preserveSelection: true });
+        };
+
+        function revealTransferPlayerInFilters(playerId) {
+            const player = getAllTransferPlayers().find(item => item.id === playerId);
+            const teamFilter = document.getElementById('transfer-player-team-filter');
+            const search = document.getElementById('transfer-player-search');
+
+            if (search) search.value = '';
+
+            if (teamFilter) {
+                const validTeamId = player?.teamId || 'all';
+                teamFilter.value = [...teamFilter.options].some(option => option.value === validTeamId)
+                    ? validTeamId
+                    : 'all';
+            }
+
+            refreshTransferPlayerSelect({
+                preserveSelection: false,
+                forcePlayerId: playerId
+            });
+        }
+
         function transferPlaceholder(size = 64, text = 'J') {
             return `https://placehold.co/${size}x${size}/e2e8f0/64748b?text=${encodeURIComponent(text)}`;
         }
@@ -9021,26 +9167,47 @@
             const previousPlayer = playerSelect.value;
             const previousFrom = fromSelect.value;
             const previousTo = toSelect.value;
-            const players = getAllTransferPlayers();
 
-            playerSelect.innerHTML = `<option value="">Jugador personalizado</option>` + players.map(p =>
-                `<option value="${escapeTransferText(p.id)}">${escapeTransferText(p.name)} · ${escapeTransferText(p.teamName)}</option>`
-            ).join('');
+            populateTransferPlayerTeamFilter();
 
             const teamOptions = `<option value="">Seleccionar equipo</option>` + (appState.teams || []).map(team =>
                 `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
             ).join('');
-            fromSelect.innerHTML = `<option value="">Seleccionar equipo</option><option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` + (appState.teams || []).map(team =>
-                `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
-            ).join('');
-            toSelect.innerHTML = `<option value="">Seleccionar equipo</option><option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` + (appState.teams || []).map(team =>
-                `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
-            ).join('');
 
-            if (players.some(p => p.id === previousPlayer)) playerSelect.value = previousPlayer;
-            if (previousFrom === FREE_AGENT_TEAM_ID || (appState.teams || []).some(t => t.id === previousFrom)) fromSelect.value = previousFrom;
-            if (previousTo === FREE_AGENT_TEAM_ID || (appState.teams || []).some(t => t.id === previousTo)) toSelect.value = previousTo;
+            fromSelect.innerHTML =
+                `<option value="">Seleccionar equipo</option>` +
+                `<option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` +
+                (appState.teams || []).map(team =>
+                    `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
+                ).join('');
+
+            toSelect.innerHTML =
+                `<option value="">Seleccionar equipo</option>` +
+                `<option value="${FREE_AGENT_TEAM_ID}">AGENTE LIBRE</option>` +
+                (appState.teams || []).map(team =>
+                    `<option value="${escapeTransferText(team.id)}">${escapeTransferText(team.name)}</option>`
+                ).join('');
+
+            refreshTransferPlayerSelect({
+                preserveSelection: true,
+                forcePlayerId: previousPlayer
+            });
+
+            if (
+                previousFrom === FREE_AGENT_TEAM_ID ||
+                (appState.teams || []).some(team => team.id === previousFrom)
+            ) {
+                fromSelect.value = previousFrom;
+            }
+
+            if (
+                previousTo === FREE_AGENT_TEAM_ID ||
+                (appState.teams || []).some(team => team.id === previousTo)
+            ) {
+                toSelect.value = previousTo;
+            }
         }
+
 
         window.onTransferImageUrlInput = function(value) {
             if (value) pendingTransferImageData = '';
@@ -9060,14 +9227,25 @@
 
         window.onTransferPlayerChange = function(playerId) {
             if (!playerId) return;
+
             const player = getAllTransferPlayers().find(p => p.id === playerId);
             if (!player) return;
+
             const nameInput = document.getElementById('transfer-player-name');
             const imgInput = document.getElementById('transfer-player-img');
             const fromSelect = document.getElementById('transfer-from-team');
+            const toSelect = document.getElementById('transfer-to-team');
+
             if (nameInput) nameInput.value = player.name;
             if (imgInput) imgInput.value = player.img || '';
             if (fromSelect) fromSelect.value = player.teamId || '';
+
+            // Si por casualidad el destino era el mismo club del jugador,
+            // limpiarlo para evitar un traspaso inválido.
+            if (toSelect && toSelect.value === player.teamId) {
+                toSelect.value = '';
+            }
+
             pendingTransferImageData = '';
             window.previewTransferPhoto(player.img || '');
         };
@@ -9211,6 +9389,10 @@
             editingTransferId = transferId;
             pendingTransferImageData = transfer.playerImg?.startsWith('data:image/') ? transfer.playerImg : '';
             populateTransferEditorOptions();
+
+            if (transfer.playerId) {
+                revealTransferPlayerInFilters(transfer.playerId);
+            }
 
             const playerSelect = document.getElementById('transfer-player-select');
             const nameInput = document.getElementById('transfer-player-name');
