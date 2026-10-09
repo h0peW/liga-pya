@@ -2266,6 +2266,17 @@
             border-color: rgba(245, 158, 11, .28);
         }
 
+    
+        @media (max-width: 720px) {
+            #face2face-content .f2f-history-row {
+                grid-template-columns: 1fr auto 1fr !important;
+            }
+            #face2face-content .f2f-history-row > :first-child {
+                grid-column: 1 / -1;
+                margin-bottom: .15rem;
+            }
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2742,10 +2753,13 @@
                             <button onclick="openHistory('face2face')" class="bg-slate-200 hover:bg-slate-300 text-slate-700 font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm">
                                 <i class="fa-solid fa-clock-rotate-left"></i> Historial
                             </button>
+                            <select id="face2face-season-select" onchange="changeFace2FaceSeason()" class="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 p-2.5 font-semibold min-w-[170px]" title="Filtrar historial por temporada">
+                                <option value="">Temporada actual</option>
+                            </select>
                             <select id="face2face-phase-select" onchange="renderFace2Face()" class="bg-slate-50 border border-slate-300 text-slate-900 text-sm rounded-lg focus:ring-emerald-500 focus:border-emerald-500 p-2.5 font-semibold">
                                 <option value="todos">Todas las fases</option>
                                 <option value="liga">Fase Regular (Liga)</option>
-                                <option value="eliminatoria">Champions League (Eliminatorias)</option>
+                                <option value="eliminatoria">Eliminatorias</option>
                             </select>
                         </div>
                     </div>
@@ -10393,114 +10407,281 @@
             return matches.sort((a,b) => a.dateOrder - b.dateOrder);
         }
 
+        function getFace2FaceClubKey(team) {
+            return team?.clubKey || team?.id || '';
+        }
+
+        function getFace2FaceSelectedSeasonId() {
+            const select = document.getElementById('face2face-season-select');
+            return select?.value || appState?.id || '';
+        }
+
+        function populateFace2FaceSeasonOptions() {
+            const select = document.getElementById('face2face-season-select');
+            if (!select || !rootState?.leagues) return;
+
+            const previous = select.value;
+            const leagues = [...rootState.leagues].sort(
+                (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+            );
+
+            select.innerHTML = `
+                <option value="all">Historial completo</option>
+                ${leagues.map(league =>
+                    `<option value="${league.id}">${escapeTransferText(league.name || 'Temporada')}</option>`
+                ).join('')}
+            `;
+
+            if (previous && (previous === 'all' || leagues.some(league => league.id === previous))) {
+                select.value = previous;
+            } else {
+                select.value = appState?.id || leagues[0]?.id || 'all';
+            }
+        }
+
+        function getFace2FaceLeagues(seasonId = getFace2FaceSelectedSeasonId()) {
+            if (!rootState?.leagues) return appState ? [appState] : [];
+
+            if (seasonId === 'all') {
+                return [...rootState.leagues].sort(
+                    (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+                );
+            }
+
+            const selected = rootState.leagues.find(league => league.id === seasonId);
+            return selected ? [selected] : (appState ? [appState] : []);
+        }
+
+        function getFace2FaceCatalogTeams(seasonId = getFace2FaceSelectedSeasonId()) {
+            const leagues = getFace2FaceLeagues(seasonId);
+            const byClub = new Map();
+
+            // Como las ligas vienen de más reciente a más antigua, el primer
+            // nombre/escudo encontrado será el que se muestra en el selector.
+            leagues.forEach(league => {
+                (league.teams || []).forEach(team => {
+                    const clubKey = getFace2FaceClubKey(team);
+                    if (!clubKey || byClub.has(clubKey)) return;
+                    byClub.set(clubKey, {
+                        clubKey,
+                        name: team.name || 'Equipo',
+                        logo: team.logo || '',
+                        latestTeamId: team.id,
+                        leagueId: league.id
+                    });
+                });
+            });
+
+            return [...byClub.values()].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+        }
+
+        function resolveFace2FaceClubKey(value) {
+            if (!value || !rootState?.leagues) return value || '';
+
+            for (const league of rootState.leagues) {
+                const team = (league.teams || []).find(item =>
+                    item.id === value || getFace2FaceClubKey(item) === value
+                );
+                if (team) return getFace2FaceClubKey(team);
+            }
+
+            return value;
+        }
+
+        function getFace2FaceDisplayTeam(clubKey, seasonId = getFace2FaceSelectedSeasonId()) {
+            const leagues = getFace2FaceLeagues(seasonId);
+            for (const league of leagues) {
+                const team = (league.teams || []).find(item => getFace2FaceClubKey(item) === clubKey);
+                if (team) return team;
+            }
+
+            // Fallback global si en la temporada filtrada ya no existe.
+            for (const league of (rootState?.leagues || [])) {
+                const team = (league.teams || []).find(item => getFace2FaceClubKey(item) === clubKey);
+                if (team) return team;
+            }
+
+            return null;
+        }
+
         window.populateFace2FaceTeams = function() {
             const select1 = document.getElementById('face2face-team1');
             const select2 = document.getElementById('face2face-team2');
             if (!select1 || !select2) return;
 
-            const teams = [...appState.teams].sort((a, b) => a.name.localeCompare(b.name, 'es'));
-            const old1 = select1.value;
-            const old2 = select2.value;
-            const options = teams.map(t => `<option value="${t.id}">${t.name}</option>`).join('');
+            populateFace2FaceSeasonOptions();
+
+            const seasonId = getFace2FaceSelectedSeasonId();
+            const teams = getFace2FaceCatalogTeams(seasonId);
+
+            const old1 = resolveFace2FaceClubKey(select1.value);
+            const old2 = resolveFace2FaceClubKey(select2.value);
+
+            const options = teams.map(team =>
+                `<option value="${escapeTransferText(team.clubKey)}">${escapeTransferText(team.name)}</option>`
+            ).join('');
+
             select1.innerHTML = `<option value="">-- Selecciona un equipo --</option>${options}`;
             select2.innerHTML = `<option value="">-- Selecciona un equipo --</option>${options}`;
 
-            if (teams.some(t => t.id === old1)) select1.value = old1;
-            if (teams.some(t => t.id === old2)) select2.value = old2;
-            if (!select1.value && teams.length > 0) select1.value = teams[0].id;
-            if (!select2.value && teams.length > 1) select2.value = teams[1].id;
+            if (teams.some(team => team.clubKey === old1)) select1.value = old1;
+            if (teams.some(team => team.clubKey === old2)) select2.value = old2;
+
+            if (!select1.value && teams.length > 0) select1.value = teams[0].clubKey;
+            if (!select2.value && teams.length > 1) {
+                select2.value = teams.find(team => team.clubKey !== select1.value)?.clubKey || '';
+            }
         };
 
-        function getFace2FaceTeamMatches(team1Id, team2Id, phase) {
-            const matches = [];
-            if (!team1Id || !team2Id || team1Id === team2Id) return matches;
+        window.changeFace2FaceSeason = function() {
+            populateFace2FaceTeams();
+            renderFace2Face();
+        };
 
-            if (phase === 'todos' || phase === 'liga') {
-                appState.matches.forEach(match => {
-                    if (match.homeGoals === null || match.awayGoals === null || match.homeGoals === '' || match.awayGoals === '') return;
-                    const isPair = (match.homeId === team1Id && match.awayId === team2Id) ||
-                                   (match.homeId === team2Id && match.awayId === team1Id);
-                    if (!isPair) return;
-                    matches.push({
-                        phase: 'liga',
-                        label: `Fecha ${match.round}`,
-                        dateOrder: match.round,
-                        homeTeam: appState.teams.find(t => t.id === match.homeId),
-                        awayTeam: appState.teams.find(t => t.id === match.awayId),
-                        homeGoals: parseInt(match.homeGoals),
-                        awayGoals: parseInt(match.awayGoals),
-                        team1Home: match.homeId === team1Id,
-                        matchId: match.id
-                    });
-                });
+        function getFace2FaceDomesticMatches(league) {
+            if (Array.isArray(league?.domesticLeagues) && league.domesticLeagues.length) {
+                return league.domesticLeagues.flatMap(competition =>
+                    (competition?.matches || []).map(match => ({
+                        ...match,
+                        competitionName: competition?.name || 'Liga'
+                    }))
+                );
             }
 
-            if ((phase === 'todos' || phase === 'eliminatoria') && appState.bracket) {
-                getBracketMatchEntries(appState.bracket).forEach(({key, match, title, order}) => {
-                    if (!match || !match.home || !match.away) return;
-                    const isPair = (match.home === team1Id && match.away === team2Id) ||
-                                   (match.home === team2Id && match.away === team1Id);
-                    if (!isPair) return;
-
-                    const legs = [
-                        { suffix: ' - Ida', homeGoals: match.hScoreIda, awayGoals: match.aScoreIda, order: 100 + order * 2 },
-                        { suffix: ' - Vuelta', homeGoals: match.hScoreVuelta, awayGoals: match.aScoreVuelta, order: 101 + order * 2 }
-                    ];
-                    const hasLegScores = legs.some(l => l.homeGoals !== null && l.awayGoals !== null && l.homeGoals !== '' && l.awayGoals !== '' && l.homeGoals !== undefined && l.awayGoals !== undefined);
-                    if (hasLegScores) {
-                        legs.forEach(leg => {
-                            if (leg.homeGoals === null || leg.awayGoals === null || leg.homeGoals === '' || leg.awayGoals === '' || leg.homeGoals === undefined || leg.awayGoals === undefined) return;
-                            const home = appState.teams.find(t => t.id === match.home);
-                            const away = appState.teams.find(t => t.id === match.away);
-                            matches.push({
-                                phase: 'eliminatoria',
-                                label: title + leg.suffix,
-                                dateOrder: leg.order,
-                                homeTeam: home,
-                                awayTeam: away,
-                                homeGoals: parseInt(leg.homeGoals),
-                                awayGoals: parseInt(leg.awayGoals),
-                                team1Home: match.home === team1Id,
-                                matchId: `${key}-${leg.suffix}`
-                            });
-                        });
-                    } else if (match.hScore !== null && match.aScore !== null && match.hScore !== '' && match.aScore !== '' && match.hScore !== undefined && match.aScore !== undefined) {
-                        const home = appState.teams.find(t => t.id === match.home);
-                        const away = appState.teams.find(t => t.id === match.away);
-                        matches.push({
-                            phase: 'eliminatoria',
-                            label: title,
-                            dateOrder: 100 + order,
-                            homeTeam: home,
-                            awayTeam: away,
-                            homeGoals: parseInt(match.hScore),
-                            awayGoals: parseInt(match.aScore),
-                            team1Home: match.home === team1Id,
-                            matchId: key
-                        });
-                    }
-                });
-            }
-            return matches.sort((a, b) => a.dateOrder - b.dateOrder);
+            return (league?.matches || []).map(match => ({
+                ...match,
+                competitionName: 'Liga'
+            }));
         }
+
+        function getFace2FaceTeamMatches(clubKey1, clubKey2, phase, seasonId = getFace2FaceSelectedSeasonId()) {
+            const matches = [];
+            if (!clubKey1 || !clubKey2 || clubKey1 === clubKey2) return matches;
+
+            const leagues = getFace2FaceLeagues(seasonId);
+
+            leagues.forEach((league, leagueIndex) => {
+                const team1 = (league.teams || []).find(team => getFace2FaceClubKey(team) === clubKey1);
+                const team2 = (league.teams || []).find(team => getFace2FaceClubKey(team) === clubKey2);
+                if (!team1 || !team2) return;
+
+                const seasonName = league.name || 'Temporada';
+                const seasonTimestamp = new Date(league.createdAt || 0).getTime() || 0;
+
+                if (phase === 'todos' || phase === 'liga') {
+                    getFace2FaceDomesticMatches(league).forEach(match => {
+                        if (
+                            match.homeGoals === null || match.awayGoals === null ||
+                            match.homeGoals === '' || match.awayGoals === '' ||
+                            match.homeGoals === undefined || match.awayGoals === undefined
+                        ) return;
+
+                        const isPair =
+                            (match.homeId === team1.id && match.awayId === team2.id) ||
+                            (match.homeId === team2.id && match.awayId === team1.id);
+                        if (!isPair) return;
+
+                        const round = Number(match.round) || 0;
+                        matches.push({
+                            phase: 'liga',
+                            label: `${match.competitionName || 'Liga'} · Fecha ${round || '?'}`,
+                            seasonName,
+                            seasonId: league.id,
+                            seasonTimestamp,
+                            dateOrder: round,
+                            homeTeam: (league.teams || []).find(t => t.id === match.homeId) || team1,
+                            awayTeam: (league.teams || []).find(t => t.id === match.awayId) || team2,
+                            homeGoals: parseInt(match.homeGoals, 10),
+                            awayGoals: parseInt(match.awayGoals, 10),
+                            team1Home: match.homeId === team1.id,
+                            matchId: `${league.id}:liga:${match.id}`
+                        });
+                    });
+                }
+
+                if (phase === 'todos' || phase === 'eliminatoria') {
+                    (league.bracketEditions || []).forEach((edition, editionIndex) => {
+                        const bracket = edition?.data;
+                        if (!bracket) return;
+
+                        getBracketMatchEntries(bracket).forEach(({key, match, title, order, isTwoLegged}) => {
+                            if (!match || !match.home || !match.away) return;
+
+                            const isPair =
+                                (match.home === team1.id && match.away === team2.id) ||
+                                (match.home === team2.id && match.away === team1.id);
+                            if (!isPair) return;
+
+                            const competitionName = edition.name || 'Eliminatoria';
+                            const pushMatch = (suffix, homeGoals, awayGoals, legOrder) => {
+                                if (
+                                    homeGoals === null || awayGoals === null ||
+                                    homeGoals === '' || awayGoals === '' ||
+                                    homeGoals === undefined || awayGoals === undefined
+                                ) return;
+
+                                matches.push({
+                                    phase: 'eliminatoria',
+                                    label: `${competitionName} · ${title}${suffix ? ` · ${suffix}` : ''}`,
+                                    seasonName,
+                                    seasonId: league.id,
+                                    seasonTimestamp,
+                                    dateOrder: 1000 + editionIndex * 100 + (Number(order) || 0) * 10 + legOrder,
+                                    homeTeam: (league.teams || []).find(t => t.id === match.home) || team1,
+                                    awayTeam: (league.teams || []).find(t => t.id === match.away) || team2,
+                                    homeGoals: parseInt(homeGoals, 10),
+                                    awayGoals: parseInt(awayGoals, 10),
+                                    team1Home: match.home === team1.id,
+                                    matchId: `${league.id}:${edition.id}:${key}:${suffix || 'single'}`
+                                });
+                            };
+
+                            if (isTwoLegged || match.hScoreIda !== undefined || match.hScoreVuelta !== undefined) {
+                                pushMatch('Ida', match.hScoreIda, match.aScoreIda, 1);
+                                pushMatch('Vuelta', match.hScoreVuelta, match.aScoreVuelta, 2);
+                            } else {
+                                pushMatch('', match.hScore, match.aScore, 1);
+                            }
+                        });
+                    });
+                }
+            });
+
+            // Historial completo: temporadas nuevas primero y dentro de cada una
+            // partidos más recientes primero. En una temporada concreta, conserva
+            // la misma lógica de "más reciente primero".
+            return matches.sort((a, b) =>
+                (b.seasonTimestamp - a.seasonTimestamp) ||
+                (b.dateOrder - a.dateOrder) ||
+                String(b.matchId).localeCompare(String(a.matchId))
+            );
+        }
+
 
         window.renderFace2Face = function() {
             const container = document.getElementById('face2face-content');
             const select1 = document.getElementById('face2face-team1');
             const select2 = document.getElementById('face2face-team2');
             const phaseSelect = document.getElementById('face2face-phase-select');
-            if (!container || !select1 || !select2 || !phaseSelect) return;
+            const seasonSelect = document.getElementById('face2face-season-select');
+            if (!container || !select1 || !select2 || !phaseSelect || !seasonSelect) return;
 
-            const team1Id = select1.value;
-            const team2Id = select2.value;
-            if (!team1Id || !team2Id || team1Id === team2Id) {
+            const clubKey1 = select1.value;
+            const clubKey2 = select2.value;
+            if (!clubKey1 || !clubKey2 || clubKey1 === clubKey2) {
                 container.innerHTML = `<div class="p-8 text-center text-slate-500 bg-slate-50 rounded-xl border border-slate-200"><i class="fa-solid fa-shield-halved text-3xl mb-2"></i><p>Selecciona dos equipos diferentes para ver su historial.</p></div>`;
                 return;
             }
 
-            const t1 = appState.teams.find(t => t.id === team1Id);
-            const t2 = appState.teams.find(t => t.id === team2Id);
-            const matches = getFace2FaceTeamMatches(team1Id, team2Id, phaseSelect.value);
+            const seasonId = seasonSelect.value || appState.id;
+            const t1 = getFace2FaceDisplayTeam(clubKey1, seasonId);
+            const t2 = getFace2FaceDisplayTeam(clubKey2, seasonId);
+            if (!t1 || !t2) {
+                container.innerHTML = `<div class="p-8 text-center text-slate-500 bg-slate-50 rounded-xl border border-slate-200"><i class="fa-solid fa-shield-halved text-3xl mb-2"></i><p>No se pudieron resolver ambos equipos para este filtro.</p></div>`;
+                return;
+            }
+
+            const matches = getFace2FaceTeamMatches(clubKey1, clubKey2, phaseSelect.value, seasonId);
             let t1Wins = 0, t2Wins = 0, draws = 0, t1Goals = 0, t2Goals = 0;
 
             matches.forEach(m => {
@@ -10531,11 +10712,14 @@
                 const t1G = m.team1Home ? m.homeGoals : m.awayGoals;
                 const t2G = m.team1Home ? m.awayGoals : m.homeGoals;
                 const t1Won = t1G > t2G, t2Won = t2G > t1G;
-                return `<div class="f2f-history-row last:border-0 py-3 grid grid-cols-[90px_1fr_auto_1fr] items-center gap-2">
-                    <div class="f2f-muted text-xs">${m.phase === 'liga' ? m.label : '🏆 ' + m.label}</div>
-                    <div class="text-right ${t1Won ? 'text-emerald-600 font-black' : 'f2f-history-team'}">${m.homeTeam.name} <span class="mx-1">${m.homeGoals}</span></div>
+                return `<div class="f2f-history-row last:border-0 py-3 grid grid-cols-[150px_1fr_auto_1fr] items-center gap-2">
+                    <div class="min-w-0">
+                        <div class="text-[10px] uppercase tracking-wider font-black text-emerald-600 truncate">${escapeTransferText(m.seasonName || '')}</div>
+                        <div class="f2f-muted text-xs truncate">${m.phase === 'liga' ? escapeTransferText(m.label) : '🏆 ' + escapeTransferText(m.label)}</div>
+                    </div>
+                    <div class="text-right ${t1Won ? 'text-emerald-600 font-black' : 'f2f-history-team'}">${escapeTransferText(m.homeTeam.name)} <span class="mx-1">${m.homeGoals}</span></div>
                     <div class="f2f-separator font-bold">-</div>
-                    <div class="${t2Won ? 'text-emerald-600 font-black' : 'f2f-history-team'}"><span class="mr-1">${m.awayGoals}</span> ${m.awayTeam.name}</div>
+                    <div class="${t2Won ? 'text-emerald-600 font-black' : 'f2f-history-team'}"><span class="mr-1">${m.awayGoals}</span> ${escapeTransferText(m.awayTeam.name)}</div>
                 </div>`;
             }).join('') : `<div class="py-10 text-center text-slate-500"><i class="fa-solid fa-clock-rotate-left text-3xl mb-2"></i><p>No hay partidos registrados entre estos equipos.</p></div>`;
 
@@ -10543,7 +10727,7 @@
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6 items-stretch">
                     ${teamCard(t1, t1Wins, t1Goals, 0)}
                     <div class="f2f-center-card flex flex-col items-center justify-center rounded-xl p-4">
-                        <div class="f2f-muted text-xs uppercase tracking-wider font-bold">Historial</div>
+                        <div class="f2f-muted text-xs uppercase tracking-wider font-bold">${seasonId === 'all' ? 'Historial completo' : escapeTransferText(getFace2FaceLeagues(seasonId)[0]?.name || 'Historial')}</div>
                         <div class="f2f-main-text text-4xl font-black mt-1">${matches.length}</div>
                         <div class="f2f-muted text-sm">partidos</div>
                         <div class="mt-3 text-sm font-bold text-emerald-600 text-center">${resultText}</div>
