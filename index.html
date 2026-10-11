@@ -2932,7 +2932,7 @@
                     <div id="transfer-editor" data-admin-only class="bg-slate-50 border border-slate-200 rounded-2xl p-4 md:p-5 mb-6">
                         <div class="flex flex-col md:flex-row gap-5">
                             <div class="flex flex-col items-center justify-start gap-3 md:w-32 shrink-0">
-                                <img id="transfer-photo-preview" src="https://placehold.co/160x160/e2e8f0/64748b?text=Jugador" class="transfer-editor-preview" alt="Vista previa del jugador">
+                                <img id="transfer-photo-preview" src="https://placehold.co/160x160/e2e8f0/64748b?text=Jugador" referrerpolicy="no-referrer" class="transfer-editor-preview" alt="Vista previa del jugador">
                                 <label class="cursor-pointer bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 px-3 py-2 rounded-lg text-xs font-semibold transition-colors text-center w-full">
                                     <i class="fa-solid fa-upload mr-1"></i> Subir foto
                                     <input id="transfer-photo-file" type="file" accept="image/*" class="hidden" onchange="handleTransferPhotoFile(event)">
@@ -4145,6 +4145,7 @@
             })) : [];
 
             migrateLeagueFreeAgentRoster(league);
+            backfillTransferPlayerImages(league);
 
             if (!Array.isArray(league.bracketEditions) || league.bracketEditions.length === 0) {
                 const migratedEdition = createBracketEdition('Champions League', league.bracket || initDefaultBracket());
@@ -7323,7 +7324,7 @@
             const renderTransfer = (transfer, isIncoming) => {
                 const counterpart = getCounterpart(transfer, isIncoming);
                 const playerName = transfer.playerName || 'Jugador';
-                const playerImg = transfer.playerImg || transferPlaceholder(96, playerName.slice(0, 2).toUpperCase());
+                const playerImg = getKnownTransferPlayerImage(transfer) || transferPlaceholder(96, playerName.slice(0, 2).toUpperCase());
                 const counterpartLogo = counterpart.logo || transferPlaceholder(48, counterpart.name.slice(0, 2).toUpperCase());
                 const movementText = isIncoming ? `Llega desde ${counterpart.name}` : `Sale hacia ${counterpart.name}`;
                 const typeLabel = isIncoming ? 'Compra / Alta' : 'Venta / Salida';
@@ -7331,7 +7332,7 @@
                 const typeIcon = isIncoming ? 'fa-arrow-down' : 'fa-arrow-up';
                 const feeText = transfer.fee ? String(transfer.fee) : 'Sin monto';
                 return `<div class="club-transfer-item">
-                    <img src="${escapeTransferText(playerImg)}" class="club-transfer-player-img" alt="${escapeTransferText(playerName)}" onerror="this.src='https://placehold.co/96x96/e2e8f0/64748b?text=?'">
+                    <img src="${escapeTransferText(playerImg)}" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="club-transfer-player-img" alt="${escapeTransferText(playerName)}" onerror="this.onerror=null;this.src='https://placehold.co/96x96/e2e8f0/64748b?text=?'">
                     <div class="min-w-0">
                         <div class="club-transfer-name">${escapeTransferText(playerName)}</div>
                         <div class="club-transfer-counterpart">
@@ -8990,6 +8991,85 @@
                 .replace(/'/g, '&#039;');
         }
 
+        function getKnownTransferPlayerImage(transfer) {
+            if (!transfer) return '';
+
+            const direct = String(transfer.playerImg || '').trim();
+            if (direct) return direct;
+
+            const playerId = transfer.playerId || '';
+            const normalizedName = normalizeFreeAgentName(transfer.playerName || '');
+
+            // 1. Plantilla actual / Agente Libre de la temporada activa.
+            const currentPlayer = getAllTransferPlayers().find(player =>
+                (playerId && player.id === playerId) ||
+                (!playerId && normalizedName && normalizeFreeAgentName(player.name) === normalizedName)
+            );
+            if (currentPlayer?.img) return currentPlayer.img;
+
+            // 2. Cualquier plantilla histórica o roster de Agente Libre.
+            for (const league of (rootState?.leagues || [])) {
+                for (const team of (league.teams || [])) {
+                    const found = (team.players || []).find(player =>
+                        (playerId && player.id === playerId) ||
+                        (!playerId && normalizedName && normalizeFreeAgentName(player.name) === normalizedName)
+                    );
+                    if (found?.img) return found.img;
+                }
+
+                const free = ensureLeagueFreeAgents(league).find(player =>
+                    (playerId && player.id === playerId) ||
+                    (!playerId && normalizedName && normalizeFreeAgentName(player.name) === normalizedName)
+                );
+                if (free?.img) return free.img;
+            }
+
+            // 3. Otro traspaso del mismo jugador que sí conserve la foto.
+            for (const league of (rootState?.leagues || [])) {
+                const foundTransfer = (league.transfers || []).find(item =>
+                    String(item.playerImg || '').trim() &&
+                    (
+                        (playerId && item.playerId === playerId) ||
+                        (!playerId && normalizedName && normalizeFreeAgentName(item.playerName) === normalizedName)
+                    )
+                );
+                if (foundTransfer?.playerImg) return foundTransfer.playerImg;
+            }
+
+            return '';
+        }
+
+        function backfillTransferPlayerImages(league) {
+            if (!league || !Array.isArray(league.transfers)) return false;
+            let changed = false;
+
+            league.transfers.forEach(transfer => {
+                if (String(transfer.playerImg || '').trim()) return;
+                const resolved = getKnownTransferPlayerImage(transfer);
+                if (!resolved) return;
+
+                transfer.playerImg = resolved;
+                changed = true;
+
+                const player = findLeaguePlayerSnapshot(
+                    league,
+                    transfer.playerId,
+                    transfer.playerName
+                );
+                if (player?.id) {
+                    const free = ensureLeagueFreeAgents(league).find(item => item.id === player.id);
+                    if (free && !free.img) free.img = resolved;
+
+                    (league.teams || []).forEach(team => {
+                        const rosterPlayer = (team.players || []).find(item => item.id === player.id);
+                        if (rosterPlayer && !rosterPlayer.img) rosterPlayer.img = resolved;
+                    });
+                }
+            });
+
+            return changed;
+        }
+
         function getAllTransferPlayers() {
             const playersById = new Map();
 
@@ -9332,7 +9412,14 @@
             if (fromTeamId === toTeamId) return showToast('El equipo de origen y destino deben ser diferentes');
 
             const announcedDate = announcedLocal ? new Date(announcedLocal) : new Date();
-            const playerImg = pendingTransferImageData || imageUrl || getAllTransferPlayers().find(p => p.id === playerId)?.img || '';
+            const selectedPlayer = getAllTransferPlayers().find(p => p.id === playerId);
+            const existingTransferForPhoto = existingIndex >= 0 ? appState.transfers[existingIndex] : null;
+            const playerImg =
+                pendingTransferImageData ||
+                imageUrl ||
+                selectedPlayer?.img ||
+                getKnownTransferPlayerImage(existingTransferForPhoto) ||
+                '';
             const existingIndex = (appState.transfers || []).findIndex(t => t.id === editingTransferId);
             const existing = existingIndex >= 0 ? appState.transfers[existingIndex] : null;
             const transfer = {
@@ -9387,7 +9474,8 @@
             const transfer = (appState.transfers || []).find(t => t.id === transferId);
             if (!transfer) return;
             editingTransferId = transferId;
-            pendingTransferImageData = transfer.playerImg?.startsWith('data:image/') ? transfer.playerImg : '';
+            const resolvedTransferImg = getKnownTransferPlayerImage(transfer);
+            pendingTransferImageData = resolvedTransferImg?.startsWith('data:image/') ? resolvedTransferImg : '';
             populateTransferEditorOptions();
 
             if (transfer.playerId) {
@@ -9403,7 +9491,7 @@
             const dateInput = document.getElementById('transfer-announced-at');
             if (playerSelect) playerSelect.value = getAllTransferPlayers().some(p => p.id === transfer.playerId) ? transfer.playerId : '';
             if (nameInput) nameInput.value = transfer.playerName || '';
-            if (imgInput) imgInput.value = transfer.playerImg?.startsWith('data:image/') ? '' : (transfer.playerImg || '');
+            if (imgInput) imgInput.value = resolvedTransferImg?.startsWith('data:image/') ? '' : (resolvedTransferImg || '');
             if (fromSelect) fromSelect.value = transfer.fromTeamId || '';
             if (toSelect) toSelect.value = transfer.toTeamId || '';
             if (feeInput) feeInput.value = transfer.fee ?? transfer.amount ?? '';
@@ -9413,7 +9501,7 @@
             const cancelBtn = document.getElementById('transfer-cancel-btn');
             if (saveBtn) saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk mr-1"></i> Guardar cambios';
             if (cancelBtn) cancelBtn.classList.remove('hidden');
-            window.previewTransferPhoto(transfer.playerImg || '');
+            window.previewTransferPhoto(resolvedTransferImg || '');
             document.getElementById('transfer-editor')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         };
 
@@ -9467,12 +9555,12 @@
                     ? { name: 'AGENTE LIBRE', logo: transferPlaceholder(64, 'AL') }
                     : ((appState.teams || []).find(t => t.id === transfer.toTeamId) || { name: 'Destino', logo: '' });
                 const playerName = transfer.playerName || 'Jugador';
-                const playerImg = transfer.playerImg || transferPlaceholder(100, playerName.slice(0, 2).toUpperCase());
+                const playerImg = getKnownTransferPlayerImage(transfer) || transferPlaceholder(100, playerName.slice(0, 2).toUpperCase());
                 const fromLogo = fromTeam.logo || transferPlaceholder(64, fromTeam.name.slice(0, 2).toUpperCase());
                 const toLogo = toTeam.logo || transferPlaceholder(64, toTeam.name.slice(0, 2).toUpperCase());
                 return `
                     <div class="transfer-card p-3 flex items-center gap-3 relative group">
-                        <img src="${escapeTransferText(playerImg)}" class="transfer-avatar" alt="${escapeTransferText(playerName)}" onerror="this.src='https://placehold.co/100x100/e2e8f0/64748b?text=?'">
+                        <img src="${escapeTransferText(playerImg)}" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="transfer-avatar" alt="${escapeTransferText(playerName)}" onerror="this.onerror=null;this.src='https://placehold.co/100x100/e2e8f0/64748b?text=?'">
                         <div class="min-w-0 flex-1">
                             <div class="font-semibold text-slate-700 truncate pr-12">${escapeTransferText(playerName)}</div>
                             <div class="mt-1 flex flex-wrap items-center gap-1.5">
@@ -9482,12 +9570,12 @@
                         </div>
                         <div class="flex items-center gap-2 sm:gap-3 shrink-0 pr-1">
                             <div class="flex flex-col items-center w-[62px]">
-                                <img src="${escapeTransferText(fromLogo)}" class="transfer-team-logo" title="${escapeTransferText(fromTeam.name)}" onerror="this.src='https://placehold.co/64x64/e2e8f0/64748b?text=?'">
+                                <img src="${escapeTransferText(fromLogo)}" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="transfer-team-logo" title="${escapeTransferText(fromTeam.name)}" onerror="this.src='https://placehold.co/64x64/e2e8f0/64748b?text=?'">
                                 <span class="text-[9px] text-slate-400 mt-1 max-w-[62px] truncate">${escapeTransferText(fromTeam.name)}</span>
                             </div>
                             <i class="fa-solid fa-arrow-right-long text-slate-800 text-lg"></i>
                             <div class="flex flex-col items-center w-[62px]">
-                                <img src="${escapeTransferText(toLogo)}" class="transfer-team-logo" title="${escapeTransferText(toTeam.name)}" onerror="this.src='https://placehold.co/64x64/e2e8f0/64748b?text=?'">
+                                <img src="${escapeTransferText(toLogo)}" referrerpolicy="no-referrer" loading="lazy" decoding="async" class="transfer-team-logo" title="${escapeTransferText(toTeam.name)}" onerror="this.src='https://placehold.co/64x64/e2e8f0/64748b?text=?'">
                                 <span class="text-[9px] text-slate-400 mt-1 max-w-[62px] truncate">${escapeTransferText(toTeam.name)}</span>
                             </div>
                         </div>
@@ -11181,6 +11269,7 @@
             // Mantener el roster de Agentes Libres consistente con los últimos
             // movimientos ya registrados.
             migrateLeagueFreeAgentRoster(appState);
+            backfillTransferPlayerImages(appState);
 
             const dataToSave = getPersistableState();
             if (!dataToSave || !db) return false;
