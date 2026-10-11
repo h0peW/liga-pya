@@ -9399,6 +9399,9 @@
         }
 
         window.saveTransfer = async function() {
+            if (!adminActionAllowed()) return;
+            if (!appState) return showToast('No hay una temporada activa');
+
             const playerId = document.getElementById('transfer-player-select')?.value || '';
             const playerName = document.getElementById('transfer-player-name')?.value?.trim() || '';
             const imageUrl = document.getElementById('transfer-player-img')?.value?.trim() || '';
@@ -9411,17 +9414,33 @@
             if (!fromTeamId || !toTeamId) return showToast('Selecciona equipo de origen y destino');
             if (fromTeamId === toTeamId) return showToast('El equipo de origen y destino deben ser diferentes');
 
+            if (toTeamId !== FREE_AGENT_TEAM_ID && !(appState.teams || []).some(team => team.id === toTeamId)) {
+                return showToast('El equipo de destino ya no existe en esta temporada');
+            }
+
+            if (playerId) {
+                const currentPlayer = getAllTransferPlayers().find(player => player.id === playerId);
+                if (!currentPlayer) {
+                    return showToast('No se encontró al jugador en ninguna plantilla ni en Agente Libre');
+                }
+            }
+
             const announcedDate = announcedLocal ? new Date(announcedLocal) : new Date();
+
+            // IMPORTANTE: resolver primero si estamos editando un traspaso.
+            // Antes existingIndex se usaba antes de declararse y provocaba un
+            // ReferenceError que detenía por completo "Añadir traspaso".
+            const existingIndex = (appState.transfers || []).findIndex(t => t.id === editingTransferId);
+            const existing = existingIndex >= 0 ? appState.transfers[existingIndex] : null;
+
             const selectedPlayer = getAllTransferPlayers().find(p => p.id === playerId);
-            const existingTransferForPhoto = existingIndex >= 0 ? appState.transfers[existingIndex] : null;
+            const existingTransferForPhoto = existing;
             const playerImg =
                 pendingTransferImageData ||
                 imageUrl ||
                 selectedPlayer?.img ||
                 getKnownTransferPlayerImage(existingTransferForPhoto) ||
                 '';
-            const existingIndex = (appState.transfers || []).findIndex(t => t.id === editingTransferId);
-            const existing = existingIndex >= 0 ? appState.transfers[existingIndex] : null;
             const transfer = {
                 id: existing?.id || makeId('transfer'),
                 playerId,
@@ -9462,7 +9481,11 @@
                     ? (
                         effectiveRosterSync.freeAgent
                             ? (existingIndex >= 0 ? 'Traspaso actualizado: jugador quedó como agente libre' : 'Traspaso añadido: jugador quedó como agente libre')
-                            : (existingIndex >= 0 ? 'Traspaso actualizado y plantilla sincronizada' : 'Traspaso añadido y jugador movido al nuevo equipo')
+                            : (
+                                fromTeamId === FREE_AGENT_TEAM_ID
+                                    ? (existingIndex >= 0 ? 'Traspaso actualizado: jugador fichado desde Agente Libre' : 'Fichaje realizado: jugador salió de Agente Libre y pasó al nuevo equipo')
+                                    : (existingIndex >= 0 ? 'Traspaso actualizado y plantilla sincronizada' : 'Traspaso añadido y jugador movido al nuevo equipo')
+                            )
                     )
                     : (existingIndex >= 0 ? 'Traspaso actualizado' : 'Traspaso añadido')
             );
