@@ -6797,20 +6797,31 @@
 
             let synced = 0;
 
-            // Primero eliminamos duplicados/copies antiguas de IDs fusionados.
+            // Limpiar copias automáticas antiguas en jugadores que ya no estén
+            // vinculados a ninguna edición de esta copa.
             Object.keys(store).forEach(playerId => {
                 if (!Array.isArray(store[playerId])) store[playerId] = [];
-                const awards = store[playerId];
+                if (linkedPlayerIds.has(playerId)) return;
 
+                store[playerId] = store[playerId].filter(award => !(
+                    award?.sourceType === 'team-trophy' &&
+                    sourceIds.has(award?.sourceTeamTrophyId)
+                ));
+            });
+
+            // IMPORTANTE: recorrer LOS JUGADORES VINCULADOS, no solo las claves
+            // que ya existían en playerAwards. Así un jugador sin premios previos
+            // recibe automáticamente su primera copa.
+            linkedPlayerIds.forEach(playerId => {
+                if (!Array.isArray(store[playerId])) {
+                    store[playerId] = [];
+                }
+
+                const awards = store[playerId];
                 const matching = awards.filter(award =>
                     award?.sourceType === 'team-trophy' &&
                     sourceIds.has(award?.sourceTeamTrophyId)
                 );
-
-                if (!linkedPlayerIds.has(playerId)) {
-                    store[playerId] = awards.filter(award => !matching.includes(award));
-                    return;
-                }
 
                 const playerEntries = cloneTeamTrophyEntriesForPlayer(trophy, playerId);
                 if (!playerEntries.length) return;
@@ -6826,17 +6837,81 @@
                     sourceType: 'team-trophy',
                     sourceTeamTrophyId: trophy.id,
                     sourceTeamId: team.id,
-                    sourceLeagueId: appState?.id || '',
+                    sourceLeagueId: existing?.sourceLeagueId || appState?.id || '',
                     sourceAutomatic: true,
                     entries: playerEntries
                 };
 
+                // Una sola copia automática de esta copa por jugador.
                 store[playerId] = awards.filter(award => !matching.includes(award));
                 store[playerId].push(linkedAward);
                 synced++;
             });
 
             return synced;
+        }
+
+        let teamTrophyAwardRepairSaveTimer = null;
+
+        function findTeamForTrophyClubKey(clubKey) {
+            if (!clubKey || !rootState) return null;
+
+            const activeMatch = (appState?.teams || []).find(team =>
+                getTeamTrophyKey(team) === clubKey
+            );
+            if (activeMatch) return activeMatch;
+
+            const leagues = [...(rootState.leagues || [])].sort(
+                (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)
+            );
+
+            for (const league of leagues) {
+                const team = (league.teams || []).find(item =>
+                    getTeamTrophyKey(item) === clubKey
+                );
+                if (team) return team;
+            }
+
+            return null;
+        }
+
+        function syncAllTeamTrophiesToPlayers() {
+            if (!rootState) return false;
+
+            const trophyStore = ensureTeamTrophyStore();
+            const awardStore = getAwardsStore();
+            const before = JSON.stringify(awardStore);
+
+            Object.entries(trophyStore).forEach(([clubKey, trophies]) => {
+                if (!Array.isArray(trophies) || !trophies.length) return;
+
+                const team = findTeamForTrophyClubKey(clubKey);
+                if (!team) return;
+
+                trophies.forEach(trophy => {
+                    syncTeamTrophyToPlayers(team, trophy);
+                });
+            });
+
+            return JSON.stringify(awardStore) !== before;
+        }
+
+        function scheduleTeamTrophyAwardRepairSave() {
+            if (!isAdmin || auth?.currentUser?.uid !== ADMIN_UID) return;
+            if (teamTrophyAwardRepairSaveTimer) return;
+
+            teamTrophyAwardRepairSaveTimer = setTimeout(async () => {
+                teamTrophyAwardRepairSaveTimer = null;
+                await saveToFirestore();
+            }, 0);
+        }
+
+        function repairTeamTrophyAwardsIfNeeded() {
+            const repaired = syncAllTeamTrophiesToPlayers();
+            if (repaired) {
+                scheduleTeamTrophyAwardRepairSave();
+            }
+            return repaired;
         }
 
         function removeTeamTrophyFromPlayers(trophyOrId) {
@@ -7189,7 +7264,14 @@
                     return {
                         ...entry,
                         winnerPlayerIds: old
-                            ? [...new Set((old.winnerPlayerIds || editing.awardedPlayerIds || []).filter(Boolean))]
+                            ? [...new Set((
+                                (Array.isArray(old.winnerPlayerIds) && old.winnerPlayerIds.length
+                                    ? old.winnerPlayerIds
+                                    : (Array.isArray(editing.awardedPlayerIds) && editing.awardedPlayerIds.length
+                                        ? editing.awardedPlayerIds
+                                        : currentRosterIds)
+                                )
+                            ).filter(Boolean))]
                             : [...new Set(currentRosterIds)]
                     };
                 });
@@ -7289,7 +7371,7 @@
             } else if (mode === 'edit') {
                 showToast(`Trofeo actualizado · ${synced} jugadores sincronizados`);
             } else {
-                showToast(`Trofeo añadido al equipo y a ${synced} jugadores de la plantilla`);
+                showToast(`Trofeo añadido a ${team.name} y sincronizado con ${synced} jugador${synced === 1 ? '' : 'es'} de la plantilla`);
             }
         };
 
@@ -11247,6 +11329,10 @@
         });
 
         function renderAwards() {
+            // Reparar automáticamente trofeos de equipo creados con versiones
+            // anteriores donde los jugadores sin premios no recibían su primera copa.
+            repairTeamTrophyAwardsIfNeeded();
+
             const searchInput = document.getElementById('awards-player-search');
             const searchResults = document.getElementById('awards-player-results');
             const summary = document.getElementById('awards-player-summary');
@@ -12388,6 +12474,10 @@
                 showToast("Modo espectador: solo el administrador puede guardar cambios.");
                 return false;
             }
+
+            // Mantener sincronizados los trofeos de equipo con el palmarés
+            // individual de los jugadores vinculados.
+            syncAllTeamTrophiesToPlayers();
 
             // Antes de guardar, conciliamos premios de competiciones de la temporada activa.
             // Es idempotente: no duplica pagos y corrige importe/campeón si cambian los resultados.
