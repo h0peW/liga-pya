@@ -2296,6 +2296,20 @@
             cursor: default;
         }
 
+    
+        #matchday-select,
+        #matchday-select option {
+            color: #0f172a !important;
+            background-color: #f8fafc !important;
+            -webkit-text-fill-color: #0f172a !important;
+        }
+        html.dark #matchday-select,
+        html.dark #matchday-select option {
+            color: #e2e8f0 !important;
+            background-color: #1e293b !important;
+            -webkit-text-fill-color: #e2e8f0 !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -5779,12 +5793,16 @@
             rounds.forEach(round => {
                 const option = document.createElement('option');
                 option.value = String(round);
+                option.text = `Fecha ${round}`;
                 option.textContent = `Fecha ${round}`;
-                if (round === Number(currentMatchday)) option.selected = true;
                 select.appendChild(option);
             });
 
-            select.value = String(currentMatchday);
+            const selectedIndex = Math.max(0, rounds.indexOf(Number(currentMatchday)));
+            select.selectedIndex = selectedIndex;
+            select.value = String(rounds[selectedIndex]);
+            select.setAttribute('aria-label', `Fecha ${rounds[selectedIndex]}`);
+            select.title = `Fecha ${rounds[selectedIndex]}`;
         }
 
         window.generateRandomFixtures = async function() {
@@ -5874,6 +5892,10 @@
             const rounds = getAvailableMatchdays();
             if (!select || !rounds.length) return;
 
+            if (!select.options.length || !select.value) {
+                renderMatchdaySelect();
+            }
+
             let currentIndex = rounds.indexOf(Number(currentMatchday));
             if (currentIndex < 0) currentIndex = 0;
 
@@ -5902,12 +5924,55 @@
         };
 
         window.renderCurrentMatchday = function() {
-            currentMatchday = parseInt(matchdaySelect.value) || 1;
+            const liveMatchdaySelect = getResultsMatchdaySelect();
+            if (!liveMatchdaySelect) return;
+
+            // Si el usuario entra directamente a Resultados, el selector puede
+            // seguir vacío aunque los partidos ya existan. Reconstruirlo primero.
+            if (!liveMatchdaySelect.options.length || !liveMatchdaySelect.value) {
+                renderMatchdaySelect();
+            }
+
+            const availableRounds = getAvailableMatchdays();
+
+            if (availableRounds.length) {
+                const selectedRound = Number(liveMatchdaySelect.value);
+                currentMatchday = availableRounds.includes(selectedRound)
+                    ? selectedRound
+                    : availableRounds[0];
+
+                liveMatchdaySelect.value = String(currentMatchday);
+
+                // Refuerzo para navegadores que renderizan el select mientras la
+                // pestaña estaba oculta.
+                if (!liveMatchdaySelect.value) {
+                    renderMatchdaySelect();
+                    liveMatchdaySelect.value = String(currentMatchday);
+                }
+            } else {
+                currentMatchday = 1;
+            }
+
             const domesticTeams = getActiveDomesticTeams();
-            const roundMatches = appState.matches.filter(m => m.round === currentMatchday);
+            const activeResultsMatches = getActiveResultsMatches();
+
+            // Mantener compatibilidad con el resto del código.
+            appState.matches = activeResultsMatches;
+
+            const roundMatches = activeResultsMatches.filter(
+                m => Number(m.round) === Number(currentMatchday)
+            );
             matchesContainer.innerHTML = '';
-            
-            if (!appState.matchdayMvps) appState.matchdayMvps = {};
+
+            const activeCompetition = getActiveResultsCompetition();
+            if (activeCompetition) {
+                if (!activeCompetition.matchdayMvps || typeof activeCompetition.matchdayMvps !== 'object') {
+                    activeCompetition.matchdayMvps = {};
+                }
+                appState.matchdayMvps = activeCompetition.matchdayMvps;
+            } else if (!appState.matchdayMvps) {
+                appState.matchdayMvps = {};
+            }
             const mvpContainer = document.getElementById('matchday-mvp-container');
             const actionContainer = document.getElementById('results-action-container');
 
@@ -10989,7 +11054,11 @@
             activeBtn.className = "px-4 py-2 rounded-md font-medium text-sm transition-colors bg-white text-emerald-700 shadow whitespace-nowrap";
             
             if(tabName === 'posiciones') renderStandings(); 
-            if(tabName === 'resultados') renderCurrentMatchday(); 
+            if(tabName === 'resultados') {
+                bindDomesticCompetition(appState, appState?.activeDomesticLeagueId || 'liga1');
+                renderMatchdaySelect();
+                renderCurrentMatchday();
+            }
             if(tabName === 'eliminatoria') renderBracket();
             if(tabName === 'estadisticas') {
                 renderStats();
