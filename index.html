@@ -2318,6 +2318,15 @@
             box-shadow: 0 0 0 4px rgba(16, 185, 129, .22);
         }
 
+    
+        html.dark #refresh-rosters-previous-btn:not(:disabled) {
+            background: #0891b2 !important;
+            color: #ffffff !important;
+        }
+        html.dark #refresh-rosters-previous-btn:not(:disabled):hover {
+            background: #0e7490 !important;
+        }
+
     </style>
 </head>
 <body class="text-slate-800 h-screen flex flex-col overflow-hidden">
@@ -2839,6 +2848,14 @@
                                 <label for="club-team-select" class="block text-[10px] uppercase tracking-wider text-slate-500 font-bold mb-1">Equipo</label>
                                 <select id="club-team-select" onchange="changeClubTeam(this.value)" class="w-full bg-white border border-slate-300 text-slate-900 text-sm rounded-lg p-2.5 font-semibold focus:ring-indigo-500 focus:border-indigo-500"></select>
                             </div>
+
+                            <button id="refresh-rosters-previous-btn" data-admin-only type="button"
+                                onclick="refreshRostersFromPreviousSeason()"
+                                class="bg-cyan-600 hover:bg-cyan-700 text-white font-semibold py-2.5 px-3 rounded-lg transition-colors flex items-center gap-2 text-sm"
+                                title="Actualizar únicamente las plantillas desde la temporada anterior sin tocar Liga, resultados ni eliminatorias">
+                                <i class="fa-solid fa-arrows-rotate"></i>
+                                <span data-refresh-rosters-label>Actualizar plantillas</span>
+                            </button>
 
                             <div id="club-music-public-controls" class="club-music-controls hidden" title="Controles de música de este equipo">
                                 <button id="club-music-play-btn" type="button" onclick="toggleClubMusicPlayback()" class="club-music-control-btn" aria-label="Reproducir o pausar música">
@@ -4925,6 +4942,313 @@
             return persistable;
         }
 
+        function getPreviousLeagueForRosterRefresh(targetLeague = appState) {
+            if (!rootState || !targetLeague || !Array.isArray(rootState.leagues)) return null;
+
+            const ordered = rootState.leagues
+                .map((league, index) => ({
+                    league,
+                    index,
+                    time: new Date(league.createdAt || 0).getTime() || 0
+                }))
+                .sort((a, b) => (a.time - b.time) || (a.index - b.index));
+
+            const targetIndex = ordered.findIndex(item => item.league.id === targetLeague.id);
+            if (targetIndex <= 0) return null;
+
+            return ordered[targetIndex - 1]?.league || null;
+        }
+
+        function updateRosterRefreshButton() {
+            const button = document.getElementById('refresh-rosters-previous-btn');
+            if (!button) return;
+
+            const sourceLeague = getPreviousLeagueForRosterRefresh(appState);
+            const label = button.querySelector('[data-refresh-rosters-label]');
+
+            if (!sourceLeague) {
+                button.disabled = true;
+                button.classList.add('opacity-50', 'cursor-not-allowed');
+                button.title = 'Esta es la primera temporada guardada; no existe una temporada anterior.';
+                if (label) label.textContent = 'Sin temporada anterior';
+                return;
+            }
+
+            button.disabled = false;
+            button.classList.remove('opacity-50', 'cursor-not-allowed');
+            button.title = `Copiar plantillas de ${sourceLeague.name} a ${appState?.name || 'esta temporada'} sin tocar partidos ni eliminatorias`;
+            if (label) label.textContent = `Actualizar desde ${sourceLeague.name}`;
+        }
+
+        function getLeaguePlayerLocationMap(league) {
+            const locations = new Map();
+            if (!league) return locations;
+
+            (league.teams || []).forEach(team => {
+                (team.players || []).forEach(player => {
+                    if (!player?.id) return;
+                    locations.set(player.id, {
+                        type: 'team',
+                        teamId: team.id,
+                        clubKey: team.clubKey || team.id,
+                        teamName: team.name || 'Equipo',
+                        player
+                    });
+                });
+            });
+
+            ensureLeagueFreeAgents(league).forEach(player => {
+                if (!player?.id) return;
+                locations.set(player.id, {
+                    type: 'free',
+                    teamId: FREE_AGENT_TEAM_ID,
+                    clubKey: FREE_AGENT_TEAM_ID,
+                    teamName: 'AGENTE LIBRE',
+                    player
+                });
+            });
+
+            return locations;
+        }
+
+        function findTargetTeamForRosterRefresh(targetLeague, sourceTeam) {
+            if (!targetLeague || !sourceTeam) return null;
+
+            const sourceClubKey = sourceTeam.clubKey || sourceTeam.id || '';
+            if (sourceClubKey) {
+                const byClubKey = (targetLeague.teams || []).find(team =>
+                    (team.clubKey || team.id) === sourceClubKey
+                );
+                if (byClubKey) return byClubKey;
+            }
+
+            const normalizedName = normalizeFreeAgentName(sourceTeam.name || '');
+            if (!normalizedName) return null;
+
+            return (targetLeague.teams || []).find(team =>
+                normalizeFreeAgentName(team.name || '') === normalizedName
+            ) || null;
+        }
+
+        function summarizeRosterRefreshChanges(beforeLocations, afterLocations) {
+            let moved = 0;
+            let added = 0;
+            let removed = 0;
+            let unchanged = 0;
+
+            const allIds = new Set([
+                ...beforeLocations.keys(),
+                ...afterLocations.keys()
+            ]);
+
+            allIds.forEach(playerId => {
+                const before = beforeLocations.get(playerId);
+                const after = afterLocations.get(playerId);
+
+                if (!before && after) {
+                    added++;
+                    return;
+                }
+                if (before && !after) {
+                    removed++;
+                    return;
+                }
+                if (!before || !after) return;
+
+                if (before.clubKey !== after.clubKey) moved++;
+                else unchanged++;
+            });
+
+            return { moved, added, removed, unchanged };
+        }
+
+        window.refreshRostersFromPreviousSeason = async function() {
+            if (!adminActionAllowed()) return;
+            if (!rootState || !appState) return;
+
+            // Capturar cualquier cambio de nombre/escudo que el admin tenga
+            // pendiente en la pestaña Equipos, sin tocar las competiciones.
+            if (document.getElementById('tab-equipos')?.classList.contains('active')) {
+                captureTeamEditsFromDom();
+            }
+
+            const targetLeague = appState;
+            const sourceLeague = getPreviousLeagueForRosterRefresh(targetLeague);
+
+            if (!sourceLeague) {
+                showToast('No existe una temporada anterior para actualizar.');
+                updateRosterRefreshButton();
+                return;
+            }
+
+            const sourceTeams = sourceLeague.teams || [];
+            const targetTeams = targetLeague.teams || [];
+
+            const matchingPairs = [];
+            const unmatchedSource = [];
+
+            sourceTeams.forEach(sourceTeam => {
+                const targetTeam = findTargetTeamForRosterRefresh(targetLeague, sourceTeam);
+                if (targetTeam) matchingPairs.push({ sourceTeam, targetTeam });
+                else unmatchedSource.push(sourceTeam);
+            });
+
+            if (!matchingPairs.length) {
+                showToast(`No encontré clubes coincidentes entre ${sourceLeague.name} y ${targetLeague.name}.`);
+                return;
+            }
+
+            const beforeLocations = getLeaguePlayerLocationMap(targetLeague);
+            const sourceLocations = getLeaguePlayerLocationMap(sourceLeague);
+            const sourcePlayerIds = new Set(sourceLocations.keys());
+
+            // Conservar jugadores que solo existen en la temporada destino.
+            // Esto evita borrar fichajes/altas propios de 2026-II que no tienen
+            // equivalente en 2026-I.
+            const targetOnlyPlayersByTeam = new Map();
+            targetTeams.forEach(team => {
+                const targetOnly = (team.players || []).filter(player =>
+                    player?.id && !sourcePlayerIds.has(player.id)
+                );
+                targetOnlyPlayersByTeam.set(team.id, deepClone(targetOnly));
+            });
+
+            const targetOnlyFreeAgents = ensureLeagueFreeAgents(targetLeague)
+                .filter(player => player?.id && !sourcePlayerIds.has(player.id));
+            const preservedTargetOnlyFreeAgents = deepClone(targetOnlyFreeAgents);
+
+            const confirmationLines = [
+                `¿Actualizar las plantillas de "${targetLeague.name}" usando "${sourceLeague.name}"?`,
+                '',
+                `• Clubes que se actualizarán: ${matchingPairs.length}`,
+                `• Jugadores detectados en ${sourceLeague.name}: ${sourcePlayerIds.size}`,
+                `• Los jugadores exclusivos de ${targetLeague.name} se conservarán.`,
+                `• Los traspasos ya hechos en ${targetLeague.name} se volverán a aplicar.`,
+                '',
+                'NO se modificarán:',
+                '• Liga 1 / Liga 2',
+                '• calendarios ni resultados',
+                '• eliminatorias',
+                '• estadísticas ya registradas',
+                '• trofeos, música, fondos ni finanzas',
+                '',
+                '¿Continuar?'
+            ];
+
+            if (unmatchedSource.length) {
+                confirmationLines.splice(
+                    3,
+                    0,
+                    `• Clubes de la temporada anterior sin equivalente actual: ${unmatchedSource.map(team => team.name).join(', ')}`
+                );
+            }
+
+            if (!confirm(confirmationLines.join('\n'))) return;
+
+            // 1. Copiar roster de cada club coincidente.
+            matchingPairs.forEach(({ sourceTeam, targetTeam }) => {
+                const copiedPlayers = deepClone(sourceTeam.players || []);
+                const targetOnly = targetOnlyPlayersByTeam.get(targetTeam.id) || [];
+
+                const byId = new Map();
+                copiedPlayers.forEach(player => {
+                    if (player?.id) byId.set(player.id, player);
+                });
+                targetOnly.forEach(player => {
+                    if (player?.id && !byId.has(player.id)) byId.set(player.id, player);
+                });
+
+                targetTeam.players = [...byId.values()];
+            });
+
+            // 2. Agentes libres de la temporada anterior + exclusivos del destino.
+            const freeAgentsById = new Map();
+            ensureLeagueFreeAgents(sourceLeague).forEach(player => {
+                if (player?.id) freeAgentsById.set(player.id, deepClone(player));
+            });
+            preservedTargetOnlyFreeAgents.forEach(player => {
+                if (player?.id && !freeAgentsById.has(player.id)) {
+                    freeAgentsById.set(player.id, player);
+                }
+            });
+            targetLeague.freeAgents = [...freeAgentsById.values()];
+
+            // 3. Eliminar duplicados globales de roster que pudieran quedar
+            // por datos antiguos, manteniendo la ubicación copiada.
+            const seenPlayerIds = new Set();
+            (targetLeague.teams || []).forEach(team => {
+                team.players = (team.players || []).filter(player => {
+                    if (!player?.id) return false;
+                    if (seenPlayerIds.has(player.id)) return false;
+                    seenPlayerIds.add(player.id);
+                    return true;
+                });
+            });
+            targetLeague.freeAgents = ensureLeagueFreeAgents(targetLeague).filter(player => {
+                if (!player?.id) return false;
+                if (seenPlayerIds.has(player.id)) return false;
+                seenPlayerIds.add(player.id);
+                return true;
+            });
+
+            // 4. Reaplicar los movimientos propios de la temporada destino.
+            // Esto hace que un fichaje realizado YA en 2026-II tenga prioridad
+            // sobre la plantilla heredada de 2026-I.
+            [...(targetLeague.transfers || [])]
+                .sort((a, b) =>
+                    (new Date(a.announcedAt || a.createdAt || 0).getTime() || 0) -
+                    (new Date(b.announcedAt || b.createdAt || 0).getTime() || 0)
+                )
+                .forEach(transfer => {
+                    applyTransferDestinationToRoster(targetLeague, transfer);
+                });
+
+            migrateLeagueFreeAgentRoster(targetLeague);
+            backfillTransferPlayerImages(targetLeague);
+            backfillLeagueRosterPlayerImages(targetLeague);
+
+            const afterLocations = getLeaguePlayerLocationMap(targetLeague);
+            const summary = summarizeRosterRefreshChanges(beforeLocations, afterLocations);
+
+            // No tocamos domesticLeagues, matches, bracketEditions ni ningún
+            // dato de competición. Guardar Firebase respetará además cualquier
+            // borrador pendiente de Eliminatorias gracias a getPersistableState().
+            const saved = await saveToFirestore();
+
+            if (!saved) {
+                showToast('Las plantillas se actualizaron localmente, pero Firebase no confirmó el guardado.');
+                renderAll();
+                return;
+            }
+
+            // Mantener el mismo equipo seleccionado en Página Equipo si sigue existiendo.
+            if (
+                selectedClubTeamId &&
+                !(targetLeague.teams || []).some(team => team.id === selectedClubTeamId)
+            ) {
+                selectedClubTeamId = targetLeague.teams?.[0]?.id || null;
+            }
+
+            renderAll();
+            if (document.getElementById('tab-equipos')?.classList.contains('active')) {
+                renderTeamsConfig();
+            }
+            if (document.getElementById('tab-club')?.classList.contains('active')) {
+                renderClubPage();
+            }
+            if (document.getElementById('tab-premios')?.classList.contains('active')) {
+                renderAwards();
+            }
+            populateTransferEditorOptions();
+            updateRosterRefreshButton();
+
+            showToast(
+                `Plantillas actualizadas desde ${sourceLeague.name}: ` +
+                `${summary.moved} movidos · ${summary.added} añadidos · ` +
+                `${summary.removed} retirados`
+            );
+        };
+
         function renderCompetitionSelectors() {
             const leagueSelect = document.getElementById('league-season-select');
             if (leagueSelect && rootState) {
@@ -4947,6 +5271,8 @@
                 }
                 clubSeasonSelect.value = appState.id;
             }
+
+            updateRosterRefreshButton();
 
             const editionSelect = document.getElementById('elimination-edition-select');
             const title = document.getElementById('elimination-title');
@@ -14150,7 +14476,8 @@
             'renameCurrentLeague', 'renameCurrentElimination',
             'openDomesticLeagueManager', 'saveDomesticLeagueSetup',
             'updateQualificationSlots', 'openClubMusicManager', 'saveClubMusicConfig',
-            'removeClubMusicConfig', 'handleClubMusicFileSelect'
+            'removeClubMusicConfig', 'handleClubMusicFileSelect',
+            'refreshRostersFromPreviousSeason'
         ];
 
         function adminActionAllowed() {
