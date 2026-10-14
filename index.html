@@ -265,6 +265,92 @@
         
         .sub-icon { font-size: 10px; color: #fb923c; background: white; border-radius: 50%; padding: 1px; }
 
+        .spectator-event-stack {
+            position: absolute;
+            top: -6px;
+            left: -4px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            z-index: 4;
+            pointer-events: none;
+        }
+        .spectator-event-right {
+            position: absolute;
+            top: -6px;
+            right: -4px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            z-index: 4;
+            pointer-events: none;
+        }
+        .spectator-event-chip {
+            min-width: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 999px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 2px;
+            background: rgba(255,255,255,0.96);
+            color: #0f172a;
+            border: 1px solid rgba(15,23,42,0.18);
+            box-shadow: 0 2px 8px rgba(0,0,0,0.22);
+            font-size: 9px;
+            font-weight: 800;
+            line-height: 1;
+            white-space: nowrap;
+        }
+        .spectator-event-chip.goal { color: #0f172a; }
+        .spectator-event-chip.assist { color: #2563eb; }
+        .spectator-event-chip.sub-in { color: #16a34a; }
+        .spectator-event-chip.sub-out { color: #dc2626; }
+        .spectator-event-chip.yellow {
+            border-radius: 4px;
+            width: 12px;
+            min-width: 12px;
+            padding: 0;
+            background: #facc15;
+            color: transparent;
+            border-color: rgba(120,53,15,0.26);
+        }
+        .spectator-event-chip.red {
+            border-radius: 4px;
+            width: 12px;
+            min-width: 12px;
+            padding: 0;
+            background: #ef4444;
+            color: transparent;
+            border-color: rgba(127,29,29,0.35);
+        }
+        .spectator-event-chip .fa-futbol,
+        .spectator-event-chip .fa-right-left,
+        .spectator-event-chip .fa-handshake-angle,
+        .spectator-event-chip .fa-arrow-right,
+        .spectator-event-chip .fa-arrow-left {
+            font-size: 9px;
+        }
+        .spectator-event-row {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            flex-wrap: wrap;
+        }
+        .spectator-event-minute {
+            color: #94a3b8;
+            font-size: 10px;
+            font-weight: 700;
+        }
+        .spectator-subs-note {
+            margin-top: 2px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            align-items: center;
+        }
+
 
 
         /* --- PÁGINA / PERFIL DE EQUIPO --- */
@@ -13461,6 +13547,71 @@
             document.getElementById('formation-display-home').textContent = match.formationHome || '4-3-3';
             document.getElementById('formation-display-away').textContent = match.formationAway || '4-3-3';
             
+
+            const normalizeSpectatorEventText = (value) => String(value || '')
+                .normalize('NFD')
+                .replace(/[̀-ͯ]/g, '')
+                .trim()
+                .toLowerCase();
+
+            const findSubstitutionForStarter = (entry, lineup, player) => {
+                if (!entry?.id || !Array.isArray(lineup)) return null;
+                const playerFullName = normalizeSpectatorEventText(player?.name || entry?.playerName || '');
+                const playerLastName = normalizeSpectatorEventText((player?.name || entry?.playerName || '').split(' ').pop());
+                return lineup.find(candidate => {
+                    if (!candidate || candidate.pos !== '0' || !candidate.minute || !candidate.subOut) return false;
+                    const subOut = normalizeSpectatorEventText(candidate.subOut);
+                    return !!subOut && (subOut === playerFullName || subOut === playerLastName);
+                }) || null;
+            };
+
+            const renderSpectatorEventBadges = ({ entry, player, lineup, compact = false }) => {
+                const goals = parseInt(entry?.goals || 0, 10) || 0;
+                const assists = parseInt(entry?.assists || 0, 10) || 0;
+                const yellows = parseInt(entry?.yellows || 0, 10) || 0;
+                const reds = parseInt(entry?.reds || 0, 10) || 0;
+                const subMinute = String(entry?.minute || '').trim();
+                const wasSubbedOut = findSubstitutionForStarter(entry, lineup, player);
+                const subOutMinute = String(wasSubbedOut?.minute || '').trim();
+
+                const left = [];
+                const right = [];
+
+                if (yellows > 0) {
+                    left.push(`<span class="spectator-event-chip yellow" title="Tarjeta amarilla${yellows > 1 ? ` x${yellows}` : ''}">${yellows > 1 ? `x${yellows}` : '&nbsp;'}</span>`);
+                }
+                if (reds > 0) {
+                    left.push(`<span class="spectator-event-chip red" title="Tarjeta roja${reds > 1 ? ` x${reds}` : ''}">${reds > 1 ? `x${reds}` : '&nbsp;'}</span>`);
+                }
+
+                if (goals > 0) {
+                    right.push(`<span class="spectator-event-chip goal" title="Gol${goals > 1 ? `es: ${goals}` : ''}"><i class="fa-solid fa-futbol"></i>${goals > 1 ? `<span>${goals}</span>` : ''}</span>`);
+                }
+                if (assists > 0) {
+                    right.push(`<span class="spectator-event-chip assist" title="Asistencia${assists > 1 ? `s: ${assists}` : ''}"><i class="fa-solid fa-handshake-angle"></i>${assists > 1 ? `<span>${assists}</span>` : ''}</span>`);
+                }
+                if (subMinute) {
+                    right.push(`<span class="spectator-event-chip sub-in" title="Ingresó al ${subMinute}'"><i class="fa-solid fa-arrow-right"></i><span>${subMinute}'</span></span>`);
+                } else if (subOutMinute) {
+                    right.push(`<span class="spectator-event-chip sub-out" title="Sustituido al ${subOutMinute}'"><i class="fa-solid fa-arrow-left"></i><span>${subOutMinute}'</span></span>`);
+                }
+
+                if (compact) {
+                    return {
+                        leftHtml: left.join(''),
+                        rightHtml: right.join(''),
+                        subMinute,
+                        subOutMinute,
+                        wasSubbedOut
+                    };
+                }
+
+                return `
+                    ${left.length ? `<div class="spectator-event-stack">${left.join('')}</div>` : ''}
+                    ${right.length ? `<div class="spectator-event-right">${right.join('')}</div>` : ''}
+                `;
+            };
+
             const renderSide = (lineup, team, elementId, sideName) => {
                 const lines = { 1: [], 2: [], 3: [], 4: [] }; 
                 lineup.forEach(entry => {
@@ -13480,21 +13631,14 @@
                 for(let i = 1; i <= 4; i++) {
                     if(lines[i].length === 0) continue;
                     html += `<div class="tactical-line">` + lines[i].map(p => {
-                        const pGoals = p.goals ? parseInt(p.goals) : 0;
-                        const pAssists = p.assists ? parseInt(p.assists) : 0;
-                        const pYellows = p.yellows ? parseInt(p.yellows) : 0;
-                        const pReds = p.reds ? parseInt(p.reds) : 0;
-                        let badges = '';
-                        if(pGoals > 0) badges += `<span class="text-yellow-300 ml-1" title="Gol"><i class="fa-solid fa-futbol"></i>${pGoals > 1 ? pGoals : ''}</span>`;
-                        if(pAssists > 0) badges += `<span class="text-blue-300 ml-1" title="Asistencia"><i class="fa-solid fa-handshake-angle"></i>${pAssists > 1 ? pAssists : ''}</span>`;
-                        if(pYellows > 0) badges += `<span class="text-yellow-400 ml-0.5 text-[10px]" title="Amarilla"><i class="fa-solid fa-square"></i>${pYellows > 1 ? 'x2' : ''}</span>`;
-                        if(pReds > 0) badges += `<span class="text-red-500 ml-0.5 text-[10px]" title="Roja"><i class="fa-solid fa-square"></i></span>`;
+                        const eventMarkers = renderSpectatorEventBadges({ entry: p, player: p, lineup: lineup });
                         
                         return `
                         <div class="player-node" data-id="${p.id}" data-side="${sideName}" style="transform: translate3d(${p.offsetX || 0}px, ${p.offsetY || 0}px, 0)">
+                            ${eventMarkers}
                             <img src="${p.img || 'https://placehold.co/40x40/ccc/fff'}" referrerpolicy="no-referrer" class="player-face" onerror="this.onerror=null;this.src='https://placehold.co/40x40/e2e8f0/64748b?text=?'">
                             ${p.rating ? `<div class="player-rating ${getRatingClass(p.rating)}">${parseFloat(p.rating).toFixed(1)}</div>` : ''}
-                            <div class="player-name-plate"><span>${p.num} ${p.name.split(' ').pop()}</span>${badges}</div>
+                            <div class="player-name-plate"><span>${p.num} ${p.name.split(' ').pop()}</span></div>
                         </div>
                     `}).join('') + `</div>`;
                 }
@@ -13506,29 +13650,25 @@
                 let html = subs.map(entry => {
                     const p = resolveHistoricalLineupPlayer(entry, team);
                     if(!p) return '';
-                    const pGoals = entry.goals ? parseInt(entry.goals) : 0;
-                    const pAssists = entry.assists ? parseInt(entry.assists) : 0;
-                    const pYellows = entry.yellows ? parseInt(entry.yellows) : 0;
-                    const pReds = entry.reds ? parseInt(entry.reds) : 0;
-                    let badges = '';
-                    if(pGoals > 0) badges += `<span class="text-yellow-400 ml-1 text-[10px]"><i class="fa-solid fa-futbol"></i>${pGoals > 1 ? pGoals : ''}</span>`;
-                    if(pAssists > 0) badges += `<span class="text-blue-400 ml-1 text-[10px]"><i class="fa-solid fa-handshake-angle"></i>${pAssists > 1 ? pAssists : ''}</span>`;
-                    if(pYellows > 0) badges += `<span class="text-yellow-400 ml-0.5 text-[10px]" title="Amarilla"><i class="fa-solid fa-square"></i>${pYellows > 1 ? 'x2' : ''}</span>`;
-                    if(pReds > 0) badges += `<span class="text-red-500 ml-0.5 text-[10px]" title="Roja"><i class="fa-solid fa-square"></i></span>`;
+                    const eventBadges = renderSpectatorEventBadges({ entry, player: p, lineup, compact: true });
                     
                     return `
                     <div class="flex items-center justify-between bg-slate-800/80 p-2 rounded border border-slate-700">
-                        <div class="flex items-center gap-3">
-                            <img src="${p.img || 'https://placehold.co/40x40/ccc/fff'}" referrerpolicy="no-referrer" class="w-10 h-10 rounded-full border border-slate-500 object-cover bg-white" onerror="this.onerror=null;this.src='https://placehold.co/40x40/e2e8f0/64748b?text=?'">
-                            <div class="flex flex-col text-left">
-                                <span class="text-white text-[13px] font-semibold">${p.num} ${p.name} ${badges}</span>
-                                ${entry.minute ? `
-                                <span class="text-[10px] text-slate-400 font-medium flex items-center gap-1 mt-0.5">
-                                    <i class="fa-solid fa-arrow-right text-green-500"></i> ${entry.minute}'${entry.subOut ? `<span class="text-slate-500 ml-1">Sale: ${entry.subOut}</span>` : ''}
-                                </span>` : ''}
+                        <div class="flex items-center gap-3 min-w-0">
+                            <div class="relative flex-shrink-0">
+                                ${eventBadges.leftHtml ? `<div class="spectator-event-stack">${eventBadges.leftHtml}</div>` : ''}
+                                ${eventBadges.rightHtml ? `<div class="spectator-event-right">${eventBadges.rightHtml}</div>` : ''}
+                                <img src="${p.img || 'https://placehold.co/40x40/ccc/fff'}" referrerpolicy="no-referrer" class="w-10 h-10 rounded-full border border-slate-500 object-cover bg-white" onerror="this.onerror=null;this.src='https://placehold.co/40x40/e2e8f0/64748b?text=?'">
+                            </div>
+                            <div class="flex flex-col text-left min-w-0">
+                                <span class="text-white text-[13px] font-semibold truncate">${p.num} ${p.name}</span>
+                                <div class="spectator-subs-note">
+                                    ${entry.minute ? `<span class="spectator-event-chip sub-in" title="Ingresó al ${entry.minute}'"><i class="fa-solid fa-arrow-right"></i><span>${entry.minute}'</span></span>` : ''}
+                                    ${entry.subOut ? `<span class="text-[10px] text-slate-400 font-medium">Sale por: <span class="text-slate-200">${entry.subOut}</span></span>` : ''}
+                                </div>
                             </div>
                         </div>
-                        <div class="${getRatingClass(entry.rating)} font-bold text-[12px] px-2 py-0.5 rounded shadow-sm">${entry.rating ? parseFloat(entry.rating).toFixed(1) : '-'}</div>
+                        <div class="${getRatingClass(entry.rating)} font-bold text-[12px] px-2 py-0.5 rounded shadow-sm flex-shrink-0">${entry.rating ? parseFloat(entry.rating).toFixed(1) : '-'}</div>
                     </div>
                     `;
                 }).join('');
