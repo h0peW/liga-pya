@@ -5040,6 +5040,9 @@ html.dark .tab-content .shadow-sm.bg-white { border-color: #365350 !important; }
                         trophyImg: trophy?.trophyImg || trophy?.image || '',
                         createdAt: trophy?.createdAt || new Date().toISOString(),
                         entries,
+                        sourceTrophyIds: Array.isArray(trophy?.sourceTrophyIds)
+                            ? [...new Set(trophy.sourceTrophyIds.filter(Boolean))]
+                            : [],
                         awardedPlayerIds: Array.isArray(trophy?.awardedPlayerIds)
                             ? [...new Set(trophy.awardedPlayerIds.filter(Boolean))]
                             : []
@@ -7634,6 +7637,41 @@ html.dark .tab-content .shadow-sm.bg-white { border-color: #365350 !important; }
             return repaired;
         }
 
+        // Borrar un premio en la ficha de UN jugador también debe eliminar su
+        // vinculación como ganador. De lo contrario, el sincronizador lo crea
+        // otra vez al renderizar o guardar. El trofeo del club y los demás
+        // ganadores no se modifican.
+        function unlinkTeamTrophyAwardForPlayer(playerId, sourceTrophyId) {
+            if (!rootState || !playerId || !sourceTrophyId) return false;
+            let changed = false;
+
+            Object.values(ensureTeamTrophyStore()).forEach(trophies => {
+                if (!Array.isArray(trophies)) return;
+                trophies.forEach(trophy => {
+                    const sourceIds = [
+                        trophy?.id,
+                        ...(Array.isArray(trophy?.sourceTrophyIds) ? trophy.sourceTrophyIds : [])
+                    ];
+                    if (!sourceIds.includes(sourceTrophyId)) return;
+
+                    (Array.isArray(trophy.entries) ? trophy.entries : []).forEach(entry => {
+                        if (!Array.isArray(entry.winnerPlayerIds) || !entry.winnerPlayerIds.includes(playerId)) return;
+                        entry.winnerPlayerIds = entry.winnerPlayerIds.filter(id => id !== playerId);
+                        changed = true;
+                    });
+
+                    // Datos anteriores guardaban los ganadores también a nivel de copa.
+                    // Hay que quitar la vinculación de ambos sitios para impedir
+                    // que la compatibilidad histórica vuelva a restaurar el premio.
+                    if (Array.isArray(trophy.awardedPlayerIds) && trophy.awardedPlayerIds.includes(playerId)) {
+                        trophy.awardedPlayerIds = trophy.awardedPlayerIds.filter(id => id !== playerId);
+                        changed = true;
+                    }
+                });
+            });
+            return changed;
+        }
+
         function removeTeamTrophyFromPlayers(trophyOrId) {
             const trophy = typeof trophyOrId === 'object' ? trophyOrId : null;
             const sourceIds = new Set([
@@ -7985,9 +8023,9 @@ html.dark .tab-content .shadow-sm.bg-white { border-color: #365350 !important; }
                         ...entry,
                         winnerPlayerIds: old
                             ? [...new Set((
-                                (Array.isArray(old.winnerPlayerIds) && old.winnerPlayerIds.length
+                                (Array.isArray(old.winnerPlayerIds)
                                     ? old.winnerPlayerIds
-                                    : (Array.isArray(editing.awardedPlayerIds) && editing.awardedPlayerIds.length
+                                    : (Array.isArray(editing.awardedPlayerIds)
                                         ? editing.awardedPlayerIds
                                         : currentRosterIds)
                                 )
@@ -12181,7 +12219,7 @@ html.dark .tab-content .shadow-sm.bg-white { border-color: #365350 !important; }
                             <div class="font-extrabold uppercase tracking-tight text-sm md:text-base truncate">${times}X ${escapeTransferText(award.title || 'Premio')}</div>
                             <div class="flex items-center gap-1 shrink-0 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
                                 <button onclick="openAwardEditor('${escapeTransferText(award.id)}')" class="w-7 h-7 rounded bg-white/10 hover:bg-white/20 text-white flex items-center justify-center" title="Editar premio"><i class="fa-solid fa-pen text-[11px]"></i></button>
-                                <button onclick="deleteAward('${escapeTransferText(award.id)}')" class="w-7 h-7 rounded bg-red-500/20 hover:bg-red-500/40 text-red-100 flex items-center justify-center" title="Eliminar premio"><i class="fa-solid fa-trash text-[11px]"></i></button>
+                                <button onclick="deleteAward('${escapeTransferText(award.id)}')" class="w-7 h-7 rounded bg-red-500/20 hover:bg-red-500/40 text-red-100 flex items-center justify-center" title="${award.sourceType === 'team-trophy' ? 'Quitar copa solo de este jugador' : 'Eliminar premio'}"><i class="fa-solid fa-trash text-[11px]"></i></button>
                             </div>
                         </div>
                         <div class="award-card-body">
@@ -12418,16 +12456,32 @@ html.dark .tab-content .shadow-sm.bg-white { border-color: #365350 !important; }
         };
 
         window.deleteAward = async function(awardId) {
-            if (!currentAwardsPlayerId) return;
+            if (!adminActionAllowed() || !currentAwardsPlayerId) return;
             const store = getAwardsStore();
             const awards = Array.isArray(store[currentAwardsPlayerId]) ? store[currentAwardsPlayerId] : [];
             const award = awards.find(item => item.id === awardId);
             if (!award) return;
-            if (!confirm(`¿Eliminar el premio “${award.title}”?`)) return;
+
+            const isTeamAward = award.sourceType === 'team-trophy' && Boolean(award.sourceTeamTrophyId);
+            const prompt = isTeamAward
+                ? `¿Quitar “${award.title}” del palmarés de este jugador?\n\nSolo se desvinculará a este jugador: el equipo conservará su copa y los demás jugadores conservarán sus premios.`
+                : `¿Eliminar el premio “${award.title}”?`;
+            if (!confirm(prompt)) return;
+
+            // El premio automático debe eliminarse desde su relación de origen
+            // además de la ficha del jugador: saveToFirestore() sincroniza ambas.
+            if (isTeamAward) {
+                unlinkTeamTrophyAwardForPlayer(currentAwardsPlayerId, award.sourceTeamTrophyId);
+            }
             store[currentAwardsPlayerId] = awards.filter(item => item.id !== awardId);
-            await saveToFirestore();
+
+            const saved = await saveToFirestore();
             renderAwards();
-            showToast('Premio eliminado');
+            if (saved) {
+                showToast(isTeamAward
+                    ? 'Copa desvinculada de este jugador; el trofeo del equipo se conserva'
+                    : 'Premio eliminado');
+            }
         };
 
         window.switchTab = function(tabName) {
